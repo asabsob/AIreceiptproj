@@ -3,13 +3,11 @@ import axios from "axios";
 
 // Detect environment and set API base
 const isLocal =
-  window.location.hostname.includes("localhost") ||
-  window.location.hostname.includes("127.0.0.1");
+  location.hostname.includes("localhost") || location.hostname.includes("127.0.0.1");
 
-const API_BASE = isLocal
+export const API_BASE = isLocal
   ? "http://localhost:5000"
   : (import.meta.env.VITE_API_BASE || "https://aireceiptsplit-backend-production.up.railway.app");
-console.log("API_BASE =", API_BASE);
 
 function App() {
   const [file, setFile] = useState(null);
