@@ -10,7 +10,8 @@ const BACKEND_URL = isDev
 if (!isDev && !BACKEND_URL) {
   console.error("VITE_BACKEND_URL is missing in production build.");
 }
-const PUBLIC_ORIGIN = import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
+const PUBLIC_ORIGIN =
+  import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -65,7 +66,9 @@ export default function App() {
 
   // Share URL with encoded result in the hash
 const shareUrl = result
-  ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(btoa(JSON.stringify(result)))}`
+  ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(
+      btoa(JSON.stringify(result))
+    )}`
   : "";
 
   return (
@@ -267,30 +270,43 @@ const shareUrl = result
                 </pre>
               </details>
 
-              {/* QR SHARE */}
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
-                <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 16,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <QRCodeCanvas value={shareUrl} size={160} includeMargin />
-                  <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
-                    <div style={{ marginBottom: 6, color: "#555" }}>
-                      Scan to open this receipt on another device:
-                    </div>
-                    <code>{shareUrl}</code>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+             {/* QR SHARE */}
+<div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
+  <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
+  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+    <QRCodeCanvas value={shareUrl} size={220} includeMargin />
+    <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
+      <div style={{ marginBottom: 6, color: "#555" }}>
+        Scan or use the link:
       </div>
+      <code>{shareUrl}</code>
+      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(shareUrl);
+              alert("Link copied!");
+            } catch {
+              window.prompt("Copy this link:", shareUrl);
+            }
+          }}
+          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+        >
+          Copy link
+        </button>
+        <a
+          href={shareUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
+        >
+          Open split
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
 
       <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
         Backend URL: <code>{BACKEND_URL}</code> (override with <code>VITE_BACKEND_URL</code>)
