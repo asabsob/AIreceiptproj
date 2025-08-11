@@ -10,6 +10,7 @@ const BACKEND_URL = isDev
 if (!isDev && !BACKEND_URL) {
   console.error("VITE_BACKEND_URL is missing in production build.");
 }
+const PUBLIC_ORIGIN = import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -63,10 +64,8 @@ export default function App() {
     ) ?? 0;
 
   // Share URL with encoded result in the hash
-  const shareUrl = result
-  ? `${window.location.origin}/split#data=${encodeURIComponent(
-      btoa(JSON.stringify(result))
-    )}`
+const shareUrl = result
+  ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(btoa(JSON.stringify(result)))}`
   : "";
 
   return (
