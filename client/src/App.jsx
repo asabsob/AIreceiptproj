@@ -4,14 +4,15 @@ import { QRCodeCanvas } from "qrcode.react";
 
 const isDev = import.meta.env.DEV;
 const BACKEND_URL = isDev
-  ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
-  : (import.meta.env.VITE_BACKEND_URL || "");
+  ? import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"
+  : import.meta.env.VITE_BACKEND_URL || "";
+
+const PUBLIC_ORIGIN =
+  import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
 
 if (!isDev && !BACKEND_URL) {
   console.error("VITE_BACKEND_URL is missing in production build.");
 }
-const PUBLIC_ORIGIN =
-  import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -41,7 +42,6 @@ export default function App() {
     try {
       const form = new FormData();
       form.append("file", file);
-
       const { data } = await axios.post(`${BACKEND_URL}/parse`, form, {
         timeout: 60000,
       });
@@ -64,12 +64,12 @@ export default function App() {
       0
     ) ?? 0;
 
-  // Share URL with encoded result in the hash
-const shareUrl = result
-  ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(
-      btoa(JSON.stringify(result))
-    )}`
-  : "";
+  // Always share to public domain
+  const shareUrl = result
+    ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(
+        btoa(JSON.stringify(result))
+      )}`
+    : "";
 
   return (
     <div
@@ -93,7 +93,7 @@ const shareUrl = result
           alignItems: "start",
         }}
       >
-        {/* Left panel: upload */}
+        {/* Left panel */}
         <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
           <label
             htmlFor="file"
@@ -135,7 +135,7 @@ const shareUrl = result
           )}
         </div>
 
-        {/* Right panel: results */}
+        {/* Right panel */}
         <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minHeight: 200 }}>
           <h3 style={{ marginTop: 0 }}>Parsed result</h3>
           {!result && <div style={{ color: "#777" }}>No data yet.</div>}
@@ -145,40 +145,16 @@ const shareUrl = result
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th
-                      style={{
-                        textAlign: "left",
-                        borderBottom: "1px solid #ddd",
-                        padding: 8,
-                      }}
-                    >
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
                       Item
                     </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        borderBottom: "1px solid #ddd",
-                        padding: 8,
-                      }}
-                    >
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                       Qty
                     </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        borderBottom: "1px solid #ddd",
-                        padding: 8,
-                      }}
-                    >
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                       Price
                     </th>
-                    <th
-                      style={{
-                        textAlign: "right",
-                        borderBottom: "1px solid #ddd",
-                        padding: 8,
-                      }}
-                    >
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                       Line Total
                     </th>
                   </tr>
@@ -186,39 +162,16 @@ const shareUrl = result
                 <tbody>
                   {result.items?.map((it, idx) => (
                     <tr key={idx}>
-                      <td
-                        style={{
-                          padding: 8,
-                          borderBottom: "1px solid #f1f1f1",
-                        }}
-                      >
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>
                         {it.name}
                       </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          borderBottom: "1px solid #f1f1f1",
-                          textAlign: "right",
-                        }}
-                      >
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
                         {it.quantity}
                       </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          borderBottom: "1px solid #f1f1f1",
-                          textAlign: "right",
-                        }}
-                      >
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
                         {Number(it.price || 0).toFixed(3)}
                       </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          borderBottom: "1px solid #f1f1f1",
-                          textAlign: "right",
-                        }}
-                      >
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
                         {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(3)}
                       </td>
                     </tr>
@@ -270,43 +223,46 @@ const shareUrl = result
                 </pre>
               </details>
 
-             {/* QR SHARE */}
-<div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
-  <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
-  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-    <QRCodeCanvas value={shareUrl} size={220} includeMargin />
-    <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
-      <div style={{ marginBottom: 6, color: "#555" }}>
-        Scan or use the link:
+              {/* QR SHARE */}
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
+                <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
+                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                  <QRCodeCanvas value={shareUrl} size={220} includeMargin />
+                  <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
+                    <div style={{ marginBottom: 6, color: "#555" }}>
+                      Scan or use the link:
+                    </div>
+                    <code>{shareUrl}</code>
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(shareUrl);
+                            alert("Link copied!");
+                          } catch {
+                            window.prompt("Copy this link:", shareUrl);
+                          }
+                        }}
+                        style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+                      >
+                        Copy link
+                      </button>
+                      <a
+                        href={shareUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
+                      >
+                        Open split
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
-      <code>{shareUrl}</code>
-      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(shareUrl);
-              alert("Link copied!");
-            } catch {
-              window.prompt("Copy this link:", shareUrl);
-            }
-          }}
-          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
-        >
-          Copy link
-        </button>
-        <a
-          href={shareUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
-        >
-          Open split
-        </a>
-      </div>
-    </div>
-  </div>
-</div>
-
 
       <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
         Backend URL: <code>{BACKEND_URL}</code> (override with <code>VITE_BACKEND_URL</code>)
