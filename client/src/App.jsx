@@ -40,7 +40,6 @@ export default function App() {
       const form = new FormData();
       form.append("file", file);
 
-      // Let Axios set the multipart header automatically
       const { data } = await axios.post(`${BACKEND_URL}/parse`, form, {
         timeout: 60000,
       });
@@ -63,7 +62,7 @@ export default function App() {
       0
     ) ?? 0;
 
-  // Build a shareable URL with the parsed JSON encoded in the hash
+  // Share URL with encoded result in the hash
   const shareUrl = result
     ? `${window.location.origin}/#data=${encodeURIComponent(
         btoa(JSON.stringify(result))
