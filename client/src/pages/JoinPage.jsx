@@ -1,120 +1,94 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-
-const API_BASE = import.meta.env.VITE_API_BASE || "https://aireceiptsplit-backend-production.up.railway.app";
+import axios from "axios";
+import { API_BASE } from "../App.jsx";
 
 export default function JoinPage() {
   const { sessionId } = useParams();
-  const [user, setUser] = useState(localStorage.getItem("splitUser") || "");
-  const [data, setData] = useState(null);
-  const [claims, setClaims] = useState({}); // { itemId: qty }
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [items, setItems] = useState([]);
+  const [name, setName] = useState("");
+  const [qtyById, setQtyById] = useState({});
+  const [message, setMessage] = useState("");
 
-  const fetchSession = async () => {
-    const resp = await fetch(`${API_BASE}/session/${sessionId}`);
-    const json = await resp.json();
-    if (!resp.ok) throw new Error(json.error || "Failed to fetch session");
-    setData(json);
-  };
-
-  useEffect(() => {
-    fetchSession().catch((e) => alert(e.message));
-    // Light polling to reflect others' claims (5s). Remove if using websockets later.
-    const t = setInterval(fetchSession, 5000);
-    return () => clearInterval(t);
-  }, [sessionId]);
-
-  const totalPreview = useMemo(() => {
-    if (!data?.items) return 0;
-    return data.items.reduce((sum, it) => {
-      const qty = Number(claims[it.id] || 0);
-      return sum + qty * Number(it.price || 0);
-    }, 0).toFixed(2);
-  }, [data, claims]);
-
-  const changeQty = (itemId, next) => {
-    setClaims((prev) => ({ ...prev, [itemId]: Math.max(0, next) }));
-  };
-
-  const submitClaims = async () => {
+  const load = async () => {
+    setMessage("");
     try {
-      if (!user.trim()) return alert("Please enter your name");
-      setLoading(true);
-      localStorage.setItem("splitUser", user.trim());
-
-      const payload = {
-        user: user.trim(),
-        claims: Object.entries(claims)
-          .filter(([_, qty]) => Number(qty) > 0)
-          .map(([itemId, qty]) => ({ itemId, qty: Number(qty) }))
-      };
-
-      if (!payload.claims.length) return alert("Select at least one item");
-
-      const resp = await fetch(`${API_BASE}/session/${sessionId}/claim`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const json = await resp.json();
-      if (!resp.ok) throw new Error(json.error || "Claim failed");
-      setResult(json);
-      await fetchSession(); // refresh remaining counts
+      const resp = await axios.get(`${API_BASE}/session/${sessionId}`);
+      setItems(resp.data.items || []);
     } catch (e) {
-      alert(e.message);
-    } finally {
-      setLoading(false);
+      const payload = e?.response?.data || e.message;
+      setMessage(typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
     }
   };
 
-  if (!data) return <div style={{ padding: 16 }}>Loading session…</div>;
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  const submit = async () => {
+    try {
+      if (!name.trim()) {
+        alert("Please enter your name");
+        return;
+      }
+      const claims = Object.entries(qtyById)
+        .map(([itemId, qty]) => ({ itemId, qty: Number(qty || 0) }))
+        .filter((c) => c.qty > 0);
+
+      if (!claims.length) {
+        alert("Set at least one quantity > 0");
+        return;
+      }
+      const resp = await axios.post(`${API_BASE}/session/${sessionId}/claim`, {
+        user: name.trim(),
+        claims,
+      });
+      setMessage(`Saved! Your total: $${resp.data.total.toFixed(2)}`);
+      await load();
+    } catch (e) {
+      const payload = e?.response?.data || e.message;
+      setMessage(typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
+    }
+  };
 
   return (
-    <div style={{ maxWidth: 780, margin: "40px auto", padding: 16 }}>
+    <div style={{ padding: 20 }}>
       <h1>Join Split</h1>
-      <div style={{ margin: "12px 0" }}>
-        <label>Your name:&nbsp;</label>
+      <div style={{ marginBottom: 12 }}>
         <input
-          value={user}
-          onChange={(e) => setUser(e.target.value)}
-          placeholder="e.g., Sameer"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{ padding: 8, fontSize: 16 }}
         />
       </div>
 
-      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
-        {data.items.map((it) => (
-          <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1fr 80px 140px 180px", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px dashed #eee" }}>
-            <div>{it.name}</div>
-            <div style={{ textAlign: "right" }}>{Number(it.price).toFixed(2)}</div>
-            <div style={{ textAlign: "center" }}>Remaining: {it.remaining}</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={() => changeQty(it.id, Number(claims[it.id] || 0) - 1)} disabled={(claims[it.id] || 0) <= 0}>-</button>
-              <input
-                type="number"
-                min="0"
-                max={it.remaining}
-                value={claims[it.id] || 0}
-                onChange={(e) => changeQty(it.id, Math.min(Number(e.target.value || 0), it.remaining))}
-                style={{ width: 60, textAlign: "center" }}
-              />
-              <button onClick={() => changeQty(it.id, Math.min(Number(claims[it.id] || 0) + 1, it.remaining))} disabled={(claims[it.id] || 0) >= it.remaining}>+</button>
-            </div>
+      {!items.length && <div>No items yet.</div>}
+
+      {items.map((it) => (
+        <div key={it.id} style={{ marginBottom: 10, borderBottom: "1px solid #eee", paddingBottom: 8 }}>
+          <div>
+            <strong>{it.name}</strong> — ${Number(it.price).toFixed(2)} × {it.qty}{" "}
+            <em>(remaining: {it.remaining})</em>
           </div>
-        ))}
-      </div>
+          <input
+            type="number"
+            min="0"
+            max={it.remaining}
+            value={qtyById[it.id] ?? ""}
+            onChange={(e) => setQtyById({ ...qtyById, [it.id]: e.target.value })}
+            style={{ width: 80, padding: 6, marginTop: 6 }}
+            placeholder="qty"
+          />
+        </div>
+      ))}
 
-      <div style={{ marginTop: 12 }}>
-        <strong>My total preview: {totalPreview}</strong>
-      </div>
+      <button onClick={submit} style={{ padding: "8px 14px", fontSize: 16 }}>Claim</button>
 
-      <button onClick={submitClaims} disabled={loading} style={{ marginTop: 12 }}>
-        {loading ? "Submitting…" : "Confirm Selection"}
-      </button>
-
-      {result && (
-        <div style={{ marginTop: 16, padding: 12, background: "#f6ffed", border: "1px solid #b7eb8f", borderRadius: 8 }}>
-          <div><strong>Saved!</strong> {result.user}, your total is <strong>{result.total.toFixed(2)}</strong></div>
+      {message && (
+        <div style={{ marginTop: 10 }}>
+          <em>{message}</em>
         </div>
       )}
     </div>
