@@ -1,7 +1,14 @@
 import React, { useState } from "react";
 import axios from "axios";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const isDev = import.meta.env.DEV;
+const BACKEND_URL = isDev
+  ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
+  : (import.meta.env.VITE_BACKEND_URL || "");
+
+if (!isDev && !BACKEND_URL) {
+  console.error("VITE_BACKEND_URL is missing in production build.");
+}
 
 export default function App() {
   const [file, setFile] = useState(null);
