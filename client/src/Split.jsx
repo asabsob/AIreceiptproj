@@ -1,48 +1,46 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
-function parseHashData() {
-  try {
-    const hash = window.location.hash.startsWith("#")
-      ? window.location.hash.slice(1)
-      : window.location.hash;
-    const params = new URLSearchParams(hash);
-    const enc = params.get("data");
-    if (!enc) return null;
-    const jsonStr = atob(decodeURIComponent(enc));
-    const parsed = JSON.parse(jsonStr);
+function useReceiptData() {
+  const { search } = useLocation(); // with HashRouter, ?... lives after the #
+  return useMemo(() => {
+    try {
+      const enc = new URLSearchParams(search).get("data");
+      if (!enc) return null;
+      const jsonStr = atob(decodeURIComponent(enc));
+      const parsed = JSON.parse(jsonStr);
 
-    // normalize items
-    const items = Array.isArray(parsed.items) ? parsed.items : [];
-    const normalized = items.map((it) => ({
-      name: String(it?.name ?? "").trim(),
-      quantity: Math.max(1, Number(it?.quantity ?? 1) || 1),
-      price: Number(it?.price ?? it?.unit_price ?? 0) || 0, // backend may send price or unit_price
-    }));
+      const items = Array.isArray(parsed.items) ? parsed.items : [];
+      const normalized = items.map((it) => ({
+        name: String(it?.name ?? "").trim(),
+        quantity: Math.max(1, Number(it?.quantity ?? 1) || 1),
+        price: Number(it?.price ?? it?.unit_price ?? 0) || 0,
+      }));
 
-    const subtotal =
-      parsed.subtotal ??
-      normalized.reduce(
-        (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
-        0
-      );
-    const tax =
-      parsed.tax != null ? Number(parsed.tax) : null;
-    const total =
-      parsed.total != null
-        ? Number(parsed.total)
-        : tax != null
-        ? Number(subtotal) + Number(tax)
-        : Number(subtotal);
+      const subtotal =
+        parsed.subtotal ??
+        normalized.reduce(
+          (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+          0
+        );
+      const tax = parsed.tax != null ? Number(parsed.tax) : null;
+      const total =
+        parsed.total != null
+          ? Number(parsed.total)
+          : tax != null
+          ? Number(subtotal) + Number(tax)
+          : Number(subtotal);
 
-    return { items: normalized, subtotal, tax, total };
-  } catch {
-    return null;
-  }
+      return { items: normalized, subtotal, tax, total };
+    } catch {
+      return null;
+    }
+  }, [search]);
 }
 
+
 export default function Split() {
-  const data = useMemo(parseHashData, []);
+  const data = useReceiptData();
   const [mode, setMode] = useState("even"); // "even" | "itemized"
   const [people, setPeople] = useState(["Person 1", "Person 2"]);
   const [newPerson, setNewPerson] = useState("");
