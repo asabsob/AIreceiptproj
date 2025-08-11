@@ -65,11 +65,12 @@ export default function App() {
     ) ?? 0;
 
   // Always share to public domain
-  const shareUrl = result
-    ? `${PUBLIC_ORIGIN}/split#data=${encodeURIComponent(
-        btoa(JSON.stringify(result))
-      )}`
-    : "";
+ const shareUrl = result
+  ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
+      btoa(JSON.stringify(result))
+    )}`
+  : "";
+
 
   return (
     <div
