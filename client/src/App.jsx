@@ -64,10 +64,10 @@ export default function App() {
 
   // Share URL with encoded result in the hash
   const shareUrl = result
-    ? `${window.location.origin}/#data=${encodeURIComponent(
-        btoa(JSON.stringify(result))
-      )}`
-    : "";
+  ? `${window.location.origin}/split#data=${encodeURIComponent(
+      btoa(JSON.stringify(result))
+    )}`
+  : "";
 
   return (
     <div
