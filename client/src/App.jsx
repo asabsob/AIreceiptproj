@@ -1,76 +1,183 @@
 import React, { useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom"; // <-- add
 
-// Detect environment and set API base
-const isLocal =
-  location.hostname.includes("localhost") || location.hostname.includes("127.0.0.1");
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
-export const API_BASE = isLocal
-  ? "http://localhost:5000"
-  : (import.meta.env.VITE_API_BASE || "https://aireceiptsplit-backend-production.up.railway.app");
-
-function App() {
+export default function App() {
   const [file, setFile] = useState(null);
-  const [items, setItems] = useState([]);
-  const [splitMode, setSplitMode] = useState("evenly");
-  const [numPeople, setNumPeople] = useState(2);
-  const [assignments, setAssignments] = useState({});
-  const [paymentMethod, setPaymentMethod] = useState({});
-  const navigate = useNavigate(); // <-- add
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
 
-  const handleUpload = async () => {
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFile(f);
+    setResult(null);
+    setError("");
+    const url = URL.createObjectURL(f);
+    setPreview(url);
+  };
+
+  const handleSubmit = async () => {
     if (!file) {
-      alert("Please select a file first.");
+      setError("Please choose an image.");
       return;
     }
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      // Use multipart/form-data for robustness
+      const form = new FormData();
+      form.append("file", file);
 
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64Image = reader.result.split(",")[1];
-      const mime = file?.type || "image/jpeg";
-
-      try {
-        const response = await axios.post(`${API_BASE}/parse`, {
-          image: base64Image,
-          mime,
-        });
-        setItems(response.data.items || []);
-      } catch (error) {
-        const payload = error?.response?.data || error.message;
-        console.error("Upload failed:", payload);
-        alert(typeof payload === "string" ? payload : JSON.stringify(payload, null, 2));
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const goToSplit = () => {
-    if (!items.length) {
-      alert("Parse a receipt first.");
-      return;
+      const { data } = await axios.post(`${BACKEND_URL}/parse`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000
+      });
+      setResult(data);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err?.response?.data?.error ||
+          err?.message ||
+          "Upload failed. Check backend URL and CORS."
+      );
+    } finally {
+      setLoading(false);
     }
-    // pass items to SplitHost
-    navigate("/split", { state: { items } });
   };
+
+  const totalCalc =
+    result?.items?.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0) ?? 0;
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>🧾 AI Receipt Splitter</h1>
-      <input type="file" onChange={(e) => setFile(e.target.files[0])} />
-      <button onClick={handleUpload}>Upload & Parse</button>
+    <div style={{ maxWidth: 920, margin: "40px auto", padding: 16, fontFamily: "system-ui, sans-serif" }}>
+      <h1 style={{ marginBottom: 8 }}>AIReceiptPro</h1>
+      <p style={{ color: "#666", marginTop: 0 }}>
+        Upload a receipt image → parse with AI → see structured items.
+      </p>
 
-      {items.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <button onClick={goToSplit}>Create Group QR</button>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          alignItems: "start"
+        }}
+      >
+        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
+          <label
+            htmlFor="file"
+            style={{
+              display: "block",
+              marginBottom: 8,
+              fontWeight: 600
+            }}
+          >
+            Receipt image
+          </label>
+          <input id="file" type="file" accept="image/*" onChange={onFile} />
+          {preview && (
+            <div style={{ marginTop: 12 }}>
+              <img
+                src={preview}
+                alt="preview"
+                style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #eee" }}
+              />
+            </div>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !file}
+            style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              cursor: loading ? "not-allowed" : "pointer"
+            }}
+          >
+            {loading ? "Parsing..." : "Parse receipt"}
+          </button>
+          {error && (
+            <div style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}>{error}</div>
+          )}
         </div>
-      )}
 
-      <pre>{JSON.stringify(items, null, 2)}</pre>
+        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minHeight: 200 }}>
+          <h3 style={{ marginTop: 0 }}>Parsed result</h3>
+          {!result && <div style={{ color: "#777" }}>No data yet.</div>}
 
-      {/* … your existing split options UI … */}
+          {result && (
+            <>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Item</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Qty</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Price</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.items?.map((it, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>{it.quantity}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {Number(it.price || 0).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>Subtotal</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
+                      {Number(result.subtotal ?? totalCalc).toFixed(3)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>
+                      {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>Total</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
+                      {Number(result.total ?? totalCalc).toFixed(3)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <details style={{ marginTop: 12 }}>
+                <summary>Raw JSON</summary>
+                <pre style={{ whiteSpace: "pre-wrap", background: "#fafafa", padding: 12, borderRadius: 8 }}>
+{JSON.stringify(result, null, 2)}
+                </pre>
+              </details>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
+        Backend URL: <code>{BACKEND_URL}</code> (override with <code>VITE_BACKEND_URL</code>)
+      </div>
     </div>
   );
 }
-
-export default App;
