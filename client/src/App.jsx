@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { QRCodeCanvas } from "qrcode.react";
+import Header from "./components/Header.jsx";
 
 const isDev = import.meta.env.DEV;
 const BACKEND_URL = isDev
@@ -64,209 +65,317 @@ export default function App() {
       0
     ) ?? 0;
 
-  // Always share to public domain
- const shareUrl = result
-  ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
-      btoa(JSON.stringify(result))
-    )}`
-  : "";
-
+  // Always share to public domain (HashRouter format)
+  const shareUrl = result
+    ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
+        btoa(JSON.stringify(result))
+      )}`
+    : "";
 
   return (
-    <div
-      style={{
-        maxWidth: 920,
-        margin: "40px auto",
-        padding: 16,
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <h1 style={{ marginBottom: 8 }}>AIReceiptPro</h1>
-      <p style={{ color: "#666", marginTop: 0 }}>
-        Upload a receipt image → parse with AI → see structured items.
-      </p>
-
+    <div style={{ background: "#fafafa", minHeight: "100vh" }}>
+      <Header />
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16,
-          alignItems: "start",
+          maxWidth: 1100,
+          margin: "24px auto",
+          padding: 16,
+          fontFamily: "system-ui, sans-serif",
         }}
       >
-        {/* Left panel */}
-        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
-          <label
-            htmlFor="file"
-            style={{ display: "block", marginBottom: 8, fontWeight: 600 }}
+        <h1 style={{ marginBottom: 8 }}>AIReceiptPro</h1>
+        <p style={{ color: "#666", marginTop: 0 }}>
+          Upload a receipt image → parse with AI → see structured items.
+        </p>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          {/* Left panel */}
+          <div
+            style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}
           >
-            Receipt image
-          </label>
-          <input id="file" type="file" accept="image/*" onChange={onFile} />
-          {preview && (
-            <div style={{ marginTop: 12 }}>
-              <img
-                src={preview}
-                alt="preview"
-                style={{
-                  maxWidth: "100%",
-                  borderRadius: 12,
-                  border: "1px solid #eee",
-                }}
-              />
-            </div>
-          )}
-          <button
-            onClick={handleSubmit}
-            disabled={loading || !file}
+            <label
+              htmlFor="file"
+              style={{ display: "block", marginBottom: 8, fontWeight: 600 }}
+            >
+              Receipt image
+            </label>
+            <input id="file" type="file" accept="image/*" onChange={onFile} />
+            {preview && (
+              <div style={{ marginTop: 12 }}>
+                <img
+                  src={preview}
+                  alt="preview"
+                  style={{
+                    maxWidth: "100%",
+                    borderRadius: 12,
+                    border: "1px solid #eee",
+                  }}
+                />
+              </div>
+            )}
+            <button
+              onClick={handleSubmit}
+              disabled={loading || !file}
+              style={{
+                marginTop: 12,
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                cursor: loading ? "not-allowed" : "pointer",
+              }}
+            >
+              {loading ? "Parsing..." : "Parse receipt"}
+            </button>
+            {error && (
+              <div
+                style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}
+              >
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* Right panel */}
+          <div
             style={{
-              marginTop: 12,
-              padding: "10px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              cursor: loading ? "not-allowed" : "pointer",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: 16,
+              minHeight: 200,
             }}
           >
-            {loading ? "Parsing..." : "Parse receipt"}
-          </button>
-          {error && (
-            <div style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}>
-              {error}
-            </div>
-          )}
-        </div>
+            <h3 style={{ marginTop: 0 }}>Parsed result</h3>
+            {!result && <div style={{ color: "#777" }}>No data yet.</div>}
 
-        {/* Right panel */}
-        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minHeight: 200 }}>
-          <h3 style={{ marginTop: 0 }}>Parsed result</h3>
-          {!result && <div style={{ color: "#777" }}>No data yet.</div>}
-
-          {result && (
-            <>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                      Item
-                    </th>
-                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
-                      Qty
-                    </th>
-                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
-                      Price
-                    </th>
-                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
-                      Line Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.items?.map((it, idx) => (
-                    <tr key={idx}>
-                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>
-                        {it.name}
+            {result && (
+              <>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th
+                        style={{
+                          textAlign: "left",
+                          borderBottom: "1px solid #ddd",
+                          padding: 8,
+                        }}
+                      >
+                        Item
+                      </th>
+                      <th
+                        style={{
+                          textAlign: "right",
+                          borderBottom: "1px solid #ddd",
+                          padding: 8,
+                        }}
+                      >
+                        Qty
+                      </th>
+                      <th
+                        style={{
+                          textAlign: "right",
+                          borderBottom: "1px solid #ddd",
+                          padding: 8,
+                        }}
+                      >
+                        Price
+                      </th>
+                      <th
+                        style={{
+                          textAlign: "right",
+                          borderBottom: "1px solid #ddd",
+                          padding: 8,
+                        }}
+                      >
+                        Line Total
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.items?.map((it, idx) => (
+                      <tr key={idx}>
+                        <td
+                          style={{
+                            padding: 8,
+                            borderBottom: "1px solid #f1f1f1",
+                          }}
+                        >
+                          {it.name}
+                        </td>
+                        <td
+                          style={{
+                            padding: 8,
+                            borderBottom: "1px solid #f1f1f1",
+                            textAlign: "right",
+                          }}
+                        >
+                          {it.quantity}
+                        </td>
+                        <td
+                          style={{
+                            padding: 8,
+                            borderBottom: "1px solid #f1f1f1",
+                            textAlign: "right",
+                          }}
+                        >
+                          {Number(it.price || 0).toFixed(3)}
+                        </td>
+                        <td
+                          style={{
+                            padding: 8,
+                            borderBottom: "1px solid #f1f1f1",
+                            textAlign: "right",
+                          }}
+                        >
+                          {(
+                            (Number(it.price) || 0) *
+                            (Number(it.quantity) || 1)
+                          ).toFixed(3)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td />
+                      <td />
+                      <td
+                        style={{ padding: 8, textAlign: "right", fontWeight: 600 }}
+                      >
+                        Subtotal
                       </td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
-                        {it.quantity}
-                      </td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
-                        {Number(it.price || 0).toFixed(3)}
-                      </td>
-                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
-                        {(Number(it.price || 0) * Number(it.quantity || 1)).toFixed(3)}
+                      <td
+                        style={{ padding: 8, textAlign: "right", fontWeight: 600 }}
+                      >
+                        {Number(result.subtotal ?? totalCalc).toFixed(3)}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td />
-                    <td />
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
-                      Subtotal
-                    </td>
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
-                      {Number(result.subtotal ?? totalCalc).toFixed(3)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td />
-                    <td />
-                    <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
-                    <td style={{ padding: 8, textAlign: "right" }}>
-                      {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td />
-                    <td />
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
-                      Total
-                    </td>
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
-                      {Number(result.total ?? totalCalc).toFixed(3)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+                    <tr>
+                      <td />
+                      <td />
+                      <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
+                      <td style={{ padding: 8, textAlign: "right" }}>
+                        {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td />
+                      <td />
+                      <td
+                        style={{ padding: 8, textAlign: "right", fontWeight: 700 }}
+                      >
+                        Total
+                      </td>
+                      <td
+                        style={{ padding: 8, textAlign: "right", fontWeight: 700 }}
+                      >
+                        {Number(result.total ?? totalCalc).toFixed(3)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
 
-              <details style={{ marginTop: 12 }}>
-                <summary>Raw JSON</summary>
-                <pre
+                <details style={{ marginTop: 12 }}>
+                  <summary>Raw JSON</summary>
+                  <pre
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      background: "#fafafa",
+                      padding: 12,
+                      borderRadius: 8,
+                    }}
+                  >
+{JSON.stringify(result, null, 2)}
+                  </pre>
+                </details>
+
+                {/* QR SHARE */}
+                <div
                   style={{
-                    whiteSpace: "pre-wrap",
-                    background: "#fafafa",
-                    padding: 12,
-                    borderRadius: 8,
+                    marginTop: 16,
+                    paddingTop: 16,
+                    borderTop: "1px solid #eee",
                   }}
                 >
-{JSON.stringify(result, null, 2)}
-                </pre>
-              </details>
-
-              {/* QR SHARE */}
-              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
-                <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
-                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-                  <QRCodeCanvas value={shareUrl} size={220} includeMargin />
-                  <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
-                    <div style={{ marginBottom: 6, color: "#555" }}>
-                      Scan or use the link:
-                    </div>
-                    <code>{shareUrl}</code>
-                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(shareUrl);
-                            alert("Link copied!");
-                          } catch {
-                            window.prompt("Copy this link:", shareUrl);
-                          }
+                  <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <QRCodeCanvas value={shareUrl} size={220} includeMargin />
+                    <div
+                      style={{
+                        maxWidth: 520,
+                        wordBreak: "break-all",
+                        fontSize: 13,
+                      }}
+                    >
+                      <div style={{ marginBottom: 6, color: "#555" }}>
+                        Scan or use the link:
+                      </div>
+                      <code>{shareUrl}</code>
+                      <div
+                        style={{
+                          marginTop: 8,
+                          display: "flex",
+                          gap: 8,
+                          flexWrap: "wrap",
                         }}
-                        style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
                       >
-                        Copy link
-                      </button>
-                      <a
-                        href={shareUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
-                      >
-                        Open split
-                      </a>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(shareUrl);
+                              alert("Link copied!");
+                            } catch {
+                              window.prompt("Copy this link:", shareUrl);
+                            }
+                          }}
+                          style={{
+                            padding: "6px 10px",
+                            border: "1px solid #ddd",
+                            borderRadius: 8,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Copy link
+                        </button>
+                        <a
+                          href={shareUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            padding: "6px 10px",
+                            border: "1px solid #ddd",
+                            borderRadius: 8,
+                            textDecoration: "none",
+                          }}
+                        >
+                          Open split
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
-        Backend URL: <code>{BACKEND_URL}</code> (override with <code>VITE_BACKEND_URL</code>)
+        <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
+          Backend URL: <code>{BACKEND_URL}</code> (override with{" "}
+          <code>VITE_BACKEND_URL</code>)
+        </div>
       </div>
     </div>
   );
