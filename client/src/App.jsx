@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// src/App.jsx
+import React, { useState, useMemo } from "react";
 import axios from "axios";
 import { QRCodeCanvas } from "qrcode.react";
 import Header from "./components/Header.jsx";
@@ -10,38 +11,20 @@ const BACKEND_URL = isDev
 
 const PUBLIC_ORIGIN =
   import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
-const [room, setRoom] = useState(null);
-const [creating, setCreating] = useState(false);
-
-async function startLiveSplit() {
-  if (!result || creating) return;
-  setCreating(true);
-  try {
-    const { data } = await axios.post(
-      `${BACKEND_URL}/session`,
-      { data: result },
-      { timeout: 20000 }
-    );
-    // data = { id, joinUrl }
-    setRoom(data);
-  } catch (e) {
-    console.error(e);
-    alert("Couldn't start live split. Try again.");
-  } finally {
-    setCreating(false);
-  }
-}
 
 if (!isDev && !BACKEND_URL) {
   console.error("VITE_BACKEND_URL is missing in production build.");
 }
 
 export default function App() {
+  // ✅ all hooks live inside the component
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [room, setRoom] = useState(null);
+  const [creating, setCreating] = useState(false);
 
   const onFile = (e) => {
     const f = e.target.files?.[0];
@@ -49,8 +32,7 @@ export default function App() {
     setFile(f);
     setResult(null);
     setError("");
-    const url = URL.createObjectURL(f);
-    setPreview(url);
+    setPreview(URL.createObjectURL(f));
   };
 
   const handleSubmit = async () => {
@@ -80,13 +62,32 @@ export default function App() {
     }
   };
 
+  const startLiveSplit = async () => {
+    if (!result || creating) return;
+    setCreating(true);
+    try {
+      const { data } = await axios.post(
+        `${BACKEND_URL}/session`,
+        { data: result },
+        { timeout: 20000 }
+      );
+      // { id, joinUrl }
+      setRoom(data);
+    } catch (e) {
+      console.error(e);
+      alert("Couldn't start live split. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const totalCalc =
     result?.items?.reduce(
       (acc, it) => acc + (Number(it.price) || 0) * (Number(it.quantity) || 1),
       0
     ) ?? 0;
-const service =
-  result
+
+  const service = result
     ? Math.max(
         0,
         Number(result.total ?? 0) -
@@ -95,14 +96,13 @@ const service =
       )
     : 0;
 
-  // Always share to public domain (HashRouter format)
-const shareUrl = room?.joinUrl
-  ? room.joinUrl
-  : result
-  ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
+  const shareUrl = useMemo(() => {
+    if (room?.joinUrl) return room.joinUrl;
+    if (!result) return "";
+    return `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
       btoa(JSON.stringify(result))
-    )}`
-  : "";
+    )}`;
+  }, [room, result]);
 
   return (
     <div style={{ background: "#fafafa", minHeight: "100vh" }}>
@@ -129,13 +129,8 @@ const shareUrl = room?.joinUrl
           }}
         >
           {/* Left panel */}
-          <div
-            style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}
-          >
-            <label
-              htmlFor="file"
-              style={{ display: "block", marginBottom: 8, fontWeight: 600 }}
-            >
+          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
+            <label htmlFor="file" style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>
               Receipt image
             </label>
             <input id="file" type="file" accept="image/*" onChange={onFile} />
@@ -144,11 +139,7 @@ const shareUrl = room?.joinUrl
                 <img
                   src={preview}
                   alt="preview"
-                  style={{
-                    maxWidth: "100%",
-                    borderRadius: 12,
-                    border: "1px solid #eee",
-                  }}
+                  style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #eee" }}
                 />
               </div>
             )}
@@ -166,23 +157,12 @@ const shareUrl = room?.joinUrl
               {loading ? "Parsing..." : "Parse receipt"}
             </button>
             {error && (
-              <div
-                style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}
-              >
-                {error}
-              </div>
+              <div style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}>{error}</div>
             )}
           </div>
 
           {/* Right panel */}
-          <div
-            style={{
-              border: "1px solid #eee",
-              borderRadius: 12,
-              padding: 16,
-              minHeight: 200,
-            }}
-          >
+          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minHeight: 200 }}>
             <h3 style={{ marginTop: 0 }}>Parsed result</h3>
             {!result && <div style={{ color: "#777" }}>No data yet.</div>}
 
@@ -191,40 +171,16 @@ const shareUrl = room?.joinUrl
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr>
-                      <th
-                        style={{
-                          textAlign: "left",
-                          borderBottom: "1px solid #ddd",
-                          padding: 8,
-                        }}
-                      >
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
                         Item
                       </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          borderBottom: "1px solid #ddd",
-                          padding: 8,
-                        }}
-                      >
+                      <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                         Qty
                       </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          borderBottom: "1px solid #ddd",
-                          padding: 8,
-                        }}
-                      >
+                      <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                         Price
                       </th>
-                      <th
-                        style={{
-                          textAlign: "right",
-                          borderBottom: "1px solid #ddd",
-                          padding: 8,
-                        }}
-                      >
+                      <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                         Line Total
                       </th>
                     </tr>
@@ -232,142 +188,69 @@ const shareUrl = room?.joinUrl
                   <tbody>
                     {result.items?.map((it, idx) => (
                       <tr key={idx}>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f1f1f1",
-                          }}
-                        >
-                          {it.name}
-                        </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f1f1f1",
-                            textAlign: "right",
-                          }}
-                        >
+                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
                           {it.quantity}
                         </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f1f1f1",
-                            textAlign: "right",
-                          }}
-                        >
+                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
                           {Number(it.price || 0).toFixed(3)}
                         </td>
-                        <td
-                          style={{
-                            padding: 8,
-                            borderBottom: "1px solid #f1f1f1",
-                            textAlign: "right",
-                          }}
-                        >
-                          {(
-                            (Number(it.price) || 0) *
-                            (Number(it.quantity) || 1)
-                          ).toFixed(3)}
+                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                          {((Number(it.price) || 0) * (Number(it.quantity) || 1)).toFixed(3)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                 <tfoot>
-  <tr>
-    <td />
-    <td />
-    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
-      Subtotal
-    </td>
-    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
-      {Number(result.subtotal ?? totalCalc).toFixed(3)}
-    </td>
-  </tr>
-
-  {/* NEW: Service row */}
-  <tr>
-    <td />
-    <td />
-    <td style={{ padding: 8, textAlign: "right" }}>Service</td>
-    <td style={{ padding: 8, textAlign: "right" }}>
-      {service.toFixed(3)}
-    </td>
-  </tr>
-
-  <tr>
-    <td />
-    <td />
-    <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
-    <td style={{ padding: 8, textAlign: "right" }}>
-      {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
-    </td>
-  </tr>
-  <tr>
-    <td />
-    <td />
-    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
-      Total
-    </td>
-    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
-      {Number(result.total ?? totalCalc).toFixed(3)}
-    </td>
-  </tr>
-</tfoot>
-
+                  <tfoot>
+                    <tr>
+                      <td />
+                      <td />
+                      <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>Subtotal</td>
+                      <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
+                        {Number(result.subtotal ?? totalCalc).toFixed(3)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td />
+                      <td />
+                      <td style={{ padding: 8, textAlign: "right" }}>Service</td>
+                      <td style={{ padding: 8, textAlign: "right" }}>{service.toFixed(3)}</td>
+                    </tr>
+                    <tr>
+                      <td />
+                      <td />
+                      <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
+                      <td style={{ padding: 8, textAlign: "right" }}>
+                        {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td />
+                      <td />
+                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>Total</td>
+                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
+                        {Number(result.total ?? totalCalc).toFixed(3)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
 
                 <details style={{ marginTop: 12 }}>
                   <summary>Raw JSON</summary>
-                  <pre
-                    style={{
-                      whiteSpace: "pre-wrap",
-                      background: "#fafafa",
-                      padding: 12,
-                      borderRadius: 8,
-                    }}
-                  >
-{JSON.stringify(result, null, 2)}
+                  <pre style={{ whiteSpace: "pre-wrap", background: "#fafafa", padding: 12, borderRadius: 8 }}>
+                    {JSON.stringify(result, null, 2)}
                   </pre>
                 </details>
 
-                {/* QR SHARE */}
-                <div
-                  style={{
-                    marginTop: 16,
-                    paddingTop: 16,
-                    borderTop: "1px solid #eee",
-                  }}
-                >
+                {/* Share / Live */}
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #eee" }}>
                   <h4 style={{ margin: 0, marginBottom: 8 }}>Share via QR</h4>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 16,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <QRCodeCanvas value={shareUrl} size={220} includeMargin />
-                    <div
-                      style={{
-                        maxWidth: 520,
-                        wordBreak: "break-all",
-                        fontSize: 13,
-                      }}
-                    >
-                      <div style={{ marginBottom: 6, color: "#555" }}>
-                        Scan or use the link:
-                      </div>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                    {shareUrl && <QRCodeCanvas value={shareUrl} size={220} includeMargin />}
+                    <div style={{ maxWidth: 520, wordBreak: "break-all", fontSize: 13 }}>
+                      <div style={{ marginBottom: 6, color: "#555" }}>Scan or use the link:</div>
                       <code>{shareUrl}</code>
-                      <div
-                        style={{
-                          marginTop: 8,
-                          display: "flex",
-                          gap: 8,
-                          flexWrap: "wrap",
-                        }}
-                      >
+                      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
                           onClick={async () => {
                             try {
@@ -377,12 +260,7 @@ const shareUrl = room?.joinUrl
                               window.prompt("Copy this link:", shareUrl);
                             }
                           }}
-                          style={{
-                            padding: "6px 10px",
-                            border: "1px solid #ddd",
-                            borderRadius: 8,
-                            cursor: "pointer",
-                          }}
+                          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
                         >
                           Copy link
                         </button>
@@ -390,15 +268,35 @@ const shareUrl = room?.joinUrl
                           href={shareUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          style={{
-                            padding: "6px 10px",
-                            border: "1px solid #ddd",
-                            borderRadius: 8,
-                            textDecoration: "none",
-                          }}
+                          style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
                         >
                           Open split
                         </a>
+                      </div>
+
+                      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {!room && (
+                          <button
+                            onClick={startLiveSplit}
+                            disabled={creating}
+                            style={{
+                              padding: "6px 10px",
+                              border: "1px solid #111",
+                              borderRadius: 8,
+                              cursor: creating ? "not-allowed" : "pointer",
+                              background: "#111",
+                              color: "#fff",
+                            }}
+                            title="Create a live room so friends can join and split together"
+                          >
+                            {creating ? "Starting…" : "Start live split"}
+                          </button>
+                        )}
+                        {room && (
+                          <span style={{ fontSize: 13, color: "#2e7d32" }}>
+                            Live room <b>{room.id}</b> created ✓
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -407,36 +305,9 @@ const shareUrl = room?.joinUrl
             )}
           </div>
         </div>
-<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-  {/* existing Copy/Open buttons ... */}
-
-  {!room && (
-    <button
-      onClick={startLiveSplit}
-      disabled={creating}
-      style={{
-        padding: "6px 10px",
-        border: "1px solid #111",
-        borderRadius: 8,
-        cursor: creating ? "not-allowed" : "pointer",
-        background: "#111",
-        color: "#fff",
-      }}
-      title="Create a live room so friends can join and split together"
-    >
-      {creating ? "Starting…" : "Start live split"}
-    </button>
-  )}
-  {room && (
-    <span style={{ fontSize: 13, color: "#2e7d32" }}>
-      Live room <b>{room.id}</b> created ✓
-    </span>
-  )}
-</div>
 
         <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
-          Backend URL: <code>{BACKEND_URL}</code> (override with{" "}
-          <code>VITE_BACKEND_URL</code>)
+          Backend URL: <code>{BACKEND_URL}</code> (override with <code>VITE_BACKEND_URL</code>)
         </div>
       </div>
     </div>
