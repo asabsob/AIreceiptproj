@@ -64,6 +64,15 @@ export default function App() {
       (acc, it) => acc + (Number(it.price) || 0) * (Number(it.quantity) || 1),
       0
     ) ?? 0;
+const service =
+  result
+    ? Math.max(
+        0,
+        Number(result.total ?? 0) -
+          Number(result.subtotal ?? 0) -
+          Number(result.tax ?? 0)
+      )
+    : 0;
 
   // Always share to public domain (HashRouter format)
   const shareUrl = result
@@ -241,44 +250,48 @@ export default function App() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot>
-                    <tr>
-                      <td />
-                      <td />
-                      <td
-                        style={{ padding: 8, textAlign: "right", fontWeight: 600 }}
-                      >
-                        Subtotal
-                      </td>
-                      <td
-                        style={{ padding: 8, textAlign: "right", fontWeight: 600 }}
-                      >
-                        {Number(result.subtotal ?? totalCalc).toFixed(3)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td />
-                      <td />
-                      <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
-                      <td style={{ padding: 8, textAlign: "right" }}>
-                        {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td />
-                      <td />
-                      <td
-                        style={{ padding: 8, textAlign: "right", fontWeight: 700 }}
-                      >
-                        Total
-                      </td>
-                      <td
-                        style={{ padding: 8, textAlign: "right", fontWeight: 700 }}
-                      >
-                        {Number(result.total ?? totalCalc).toFixed(3)}
-                      </td>
-                    </tr>
-                  </tfoot>
+                 <tfoot>
+  <tr>
+    <td />
+    <td />
+    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
+      Subtotal
+    </td>
+    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
+      {Number(result.subtotal ?? totalCalc).toFixed(3)}
+    </td>
+  </tr>
+
+  {/* NEW: Service row */}
+  <tr>
+    <td />
+    <td />
+    <td style={{ padding: 8, textAlign: "right" }}>Service</td>
+    <td style={{ padding: 8, textAlign: "right" }}>
+      {service.toFixed(3)}
+    </td>
+  </tr>
+
+  <tr>
+    <td />
+    <td />
+    <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
+    <td style={{ padding: 8, textAlign: "right" }}>
+      {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
+    </td>
+  </tr>
+  <tr>
+    <td />
+    <td />
+    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
+      Total
+    </td>
+    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
+      {Number(result.total ?? totalCalc).toFixed(3)}
+    </td>
+  </tr>
+</tfoot>
+
                 </table>
 
                 <details style={{ marginTop: 12 }}>
