@@ -49,8 +49,8 @@ export default function Split() {
   const [mode, setMode] = useState("itemized"); // default to itemized for partials
   const [people, setPeople] = useState(["Person 1", "Person 2"]);
   const [newPerson, setNewPerson] = useState("");
-  const [assign, setAssign] = useState({});        // { itemIndex: personIndex }  (single owner)
-  const [shares, setShares] = useState({});        // { itemIndex: number[] }     (qty per person)
+  const [assign, setAssign] = useState({}); // { itemIndex: personIndex }  (single owner)
+  const [shares, setShares] = useState({}); // { itemIndex: number[] }     (qty per person)
 
   // keep shares arrays sized with people length
   useEffect(() => {
@@ -171,7 +171,6 @@ export default function Split() {
       const sum = arr.reduce((a, b) => a + (Number(b) || 0), 0);
       if (sum > itemQty + 1e-9) {
         const over = sum - itemQty;
-        // reduce all except the just-edited field, proportionally to their sizes
         const othersTotal = sum - v || 1e-9;
         const adjusted = arr.map((q, i) =>
           i === personIdx ? q : Math.max(0, q - (over * (q / othersTotal)))
@@ -245,6 +244,7 @@ export default function Split() {
         fontFamily: "system-ui, sans-serif",
       }}
     >
+      {/* Top bar */}
       <div
         style={{
           display: "flex",
@@ -259,13 +259,11 @@ export default function Split() {
         </Link>
       </div>
 
+      {/* Summary */}
       <div style={{ marginTop: 8, color: "#666" }}>
         Subtotal: <b>{Number(data.subtotal || 0).toFixed(3)}</b> &nbsp;•&nbsp;
-        Tax/Fees:{" "}
-        <b>
-          {(+((data.total ?? 0) - (data.subtotal ?? 0))).toFixed(3)}
-        </b>{" "}
-        &nbsp;•&nbsp; Total: <b>{Number(data.total || 0).toFixed(3)}</b>
+        Tax/Fees: <b>{(+((data.total ?? 0) - (data.subtotal ?? 0))).toFixed(3)}</b> &nbsp;•&nbsp;
+        Total: <b>{Number(data.total || 0).toFixed(3)}</b>
       </div>
 
       {/* Mode toggle */}
