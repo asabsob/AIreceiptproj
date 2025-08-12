@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+// --- helpers ---
 function useReceiptData() {
-  const { search } = useLocation(); // with HashRouter, ?... lives after the #
+  const { search } = useLocation(); // HashRouter puts ?... after #
   return useMemo(() => {
     try {
       const enc = new URLSearchParams(search).get("data");
@@ -13,7 +14,7 @@ function useReceiptData() {
       const items = Array.isArray(parsed.items) ? parsed.items : [];
       const normalized = items.map((it) => ({
         name: String(it?.name ?? "").trim(),
-        quantity: Math.max(1, Number(it?.quantity ?? 1) || 1),
+        quantity: Math.max(1e-9, Number(it?.quantity ?? 1) || 1), // allow fractional qty
         price: Number(it?.price ?? it?.unit_price ?? 0) || 0,
       }));
 
@@ -38,20 +39,41 @@ function useReceiptData() {
   }, [search]);
 }
 
+function clamp(n, min, max) {
+  const v = Number.isFinite(+n) ? +n : 0;
+  return Math.min(Math.max(v, min), max);
+}
 
 export default function Split() {
   const data = useReceiptData();
-  const [mode, setMode] = useState("even"); // "even" | "itemized"
+  const [mode, setMode] = useState("itemized"); // default to itemized for partials
   const [people, setPeople] = useState(["Person 1", "Person 2"]);
   const [newPerson, setNewPerson] = useState("");
-  const [assign, setAssign] = useState({}); // { itemIndex: personIndex }
+  const [assign, setAssign] = useState({});        // { itemIndex: personIndex }  (single owner)
+  const [shares, setShares] = useState({});        // { itemIndex: number[] }     (qty per person)
 
+  // keep shares arrays sized with people length
   useEffect(() => {
-    // prune assignments when people removed
-    setAssign((old) => {
+    setShares((old) => {
       const next = { ...old };
       Object.keys(next).forEach((k) => {
-        if (next[k] >= people.length) delete next[k];
+        const arr = Array.isArray(next[k]) ? next[k] : [];
+        if (arr.length !== people.length) {
+          const resized = Array(people.length).fill(0);
+          for (let i = 0; i < Math.min(arr.length, resized.length); i++) {
+            resized[i] = arr[i];
+          }
+          next[k] = resized;
+        }
+      });
+      return next;
+    });
+    // prune single-assign indexes that exceed people length
+    setAssign((old) => {
+      const n = people.length;
+      const next = { ...old };
+      Object.keys(next).forEach((k) => {
+        if (next[k] == null || next[k] >= n) delete next[k];
       });
       return next;
     });
@@ -72,52 +94,120 @@ export default function Split() {
   const lineTotal = (it) =>
     (Number(it.price) || 0) * (Number(it.quantity) || 1);
 
-  // tax/fees delta between total and subtotal
+  // fees delta (tax, service, rounding)
   const feeDelta = useMemo(() => {
     const subtotalN = Number(data.subtotal || 0);
     const totalN = Number(data.total ?? subtotalN);
-    return +(totalN - subtotalN).toFixed(3);
+    const delta = +(totalN - subtotalN).toFixed(3);
+    return delta > 0 ? delta : 0;
   }, [data.subtotal, data.total]);
 
-  // EVEN SPLIT — use full total
+  // EVEN SPLIT — use sane base
   const evenShare = useMemo(() => {
-    const base = Number(data.total ?? data.subtotal ?? 0);
+    const totalN = Number(data.total ?? 0);
+    const subtotalN = Number(data.subtotal ?? 0);
+    const base = Math.max(totalN, subtotalN);
     const n = Math.max(people.length, 1);
     const per = +(base / n).toFixed(3);
     return Array(n).fill(per);
   }, [data.total, data.subtotal, people.length]);
 
-  // ITEMIZED SPLIT — assign items, then distribute feeDelta proportionally
+  // ITEMIZED with optional PARTIAL shares
   const itemizedTotals = useMemo(() => {
-    const base = Array(people.length).fill(0);
+    const n = people.length;
+    const base = Array(n).fill(0);
+
     data.items.forEach((it, idx) => {
-      const pIdx = assign[idx];
-      if (pIdx != null && pIdx >= 0 && pIdx < people.length) {
-        base[pIdx] += lineTotal(it);
+      const unit = Number(it.price) || 0;
+      const qty = Number(it.quantity) || 0;
+      const sArr = Array.isArray(shares[idx]) ? shares[idx] : null;
+      const sumShares = sArr ? sArr.reduce((a, b) => a + (Number(b) || 0), 0) : 0;
+
+      if (sArr && sumShares > 0) {
+        // use partial quantities
+        for (let p = 0; p < n; p++) {
+          const q = Number(sArr[p]) || 0;
+          base[p] += unit * q;
+        }
+      } else {
+        // fallback to single-assign if provided
+        const owner = assign[idx];
+        if (owner != null && owner >= 0 && owner < n) {
+          base[owner] += unit * qty;
+        }
+        // else unassigned -> ignored
       }
     });
 
     const sumBase = base.reduce((a, b) => a + b, 0);
     const adjusted = base.map((v) => {
       const share =
-        sumBase > 0
-          ? feeDelta * (v / sumBase)
-          : feeDelta / Math.max(people.length, 1);
+        sumBase > 0 ? feeDelta * (v / sumBase) : feeDelta / Math.max(n, 1);
       return +(v + share).toFixed(3);
     });
 
     return adjusted;
-  }, [assign, data.items, feeDelta, people.length]);
+  }, [assign, shares, data.items, feeDelta, people.length]);
 
+  // ---- UI actions ----
   const addPerson = () => {
     const name = newPerson.trim();
     setNewPerson("");
     if (!name) return;
     setPeople((p) => [...p, name]);
   };
-
   const removePerson = (idx) => {
     setPeople((p) => p.filter((_, i) => i !== idx));
+  };
+
+  const setShareQty = (itemIdx, personIdx, value, itemQty) => {
+    const v = clamp(value, 0, itemQty);
+    setShares((prev) => {
+      const arr = Array.isArray(prev[itemIdx])
+        ? [...prev[itemIdx]]
+        : Array(people.length).fill(0);
+      arr[personIdx] = v;
+      // cap total to itemQty by reducing others proportionally if needed
+      const sum = arr.reduce((a, b) => a + (Number(b) || 0), 0);
+      if (sum > itemQty + 1e-9) {
+        const over = sum - itemQty;
+        // reduce all except the just-edited field, proportionally to their sizes
+        const othersTotal = sum - v || 1e-9;
+        const adjusted = arr.map((q, i) =>
+          i === personIdx ? q : Math.max(0, q - (over * (q / othersTotal)))
+        );
+        return { ...prev, [itemIdx]: adjusted };
+      }
+      return { ...prev, [itemIdx]: arr };
+    });
+  };
+
+  const evenSplitItem = (itemIdx, itemQty) => {
+    const n = Math.max(people.length, 1);
+    const per = +(itemQty / n);
+    setShares((prev) => ({
+      ...prev,
+      [itemIdx]: Array(n).fill(per),
+    }));
+    // remove single-owner assignment if existed
+    setAssign((a) => {
+      const nA = { ...a };
+      delete nA[itemIdx];
+      return nA;
+    });
+  };
+
+  const clearItemSplit = (itemIdx) => {
+    setShares((prev) => {
+      const n = { ...prev };
+      delete n[itemIdx];
+      return n;
+    });
+    setAssign((a) => {
+      const n = { ...a };
+      delete n[itemIdx];
+      return n;
+    });
   };
 
   const totalsBlock = (values) => (
@@ -149,7 +239,7 @@ export default function Split() {
   return (
     <div
       style={{
-        maxWidth: 1000,
+        maxWidth: 1100,
         margin: "40px auto",
         padding: 16,
         fontFamily: "system-ui, sans-serif",
@@ -172,8 +262,10 @@ export default function Split() {
       <div style={{ marginTop: 8, color: "#666" }}>
         Subtotal: <b>{Number(data.subtotal || 0).toFixed(3)}</b> &nbsp;•&nbsp;
         Tax/Fees:{" "}
-        <b>{feeDelta !== 0 ? feeDelta.toFixed(3) : "-"}</b> &nbsp;•&nbsp; Total:{" "}
-        <b>{Number(data.total || 0).toFixed(3)}</b>
+        <b>
+          {(+((data.total ?? 0) - (data.subtotal ?? 0))).toFixed(3)}
+        </b>{" "}
+        &nbsp;•&nbsp; Total: <b>{Number(data.total || 0).toFixed(3)}</b>
       </div>
 
       {/* Mode toggle */}
@@ -200,7 +292,7 @@ export default function Split() {
             cursor: "pointer",
           }}
         >
-          Select items
+          Select / partial split
         </button>
       </div>
 
@@ -302,124 +394,120 @@ export default function Split() {
             padding: 12,
           }}
         >
-          <h3 style={{ marginTop: 0 }}>Assign items</h3>
+          <h3 style={{ marginTop: 0 }}>Assign items / Partial split</h3>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
                   Item
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                   Qty
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                   Price
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>
                   Line Total
                 </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    borderBottom: "1px solid #ddd",
-                    padding: 8,
-                  }}
-                >
-                  Assign to
+                <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
+                  Assign / Split
                 </th>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((it, idx) => (
-                <tr key={idx}>
-                  <td
-                    style={{
-                      padding: 8,
-                      borderBottom: "1px solid #f1f1f1",
-                    }}
-                  >
-                    {it.name}
-                  </td>
-                  <td
-                    style={{
-                      padding: 8,
-                      borderBottom: "1px solid #f1f1f1",
-                      textAlign: "right",
-                    }}
-                  >
-                    {it.quantity}
-                  </td>
-                  <td
-                    style={{
-                      padding: 8,
-                      borderBottom: "1px solid #f1f1f1",
-                      textAlign: "right",
-                    }}
-                  >
-                    {Number(it.price).toFixed(3)}
-                  </td>
-                  <td
-                    style={{
-                      padding: 8,
-                      borderBottom: "1px solid #f1f1f1",
-                      textAlign: "right",
-                    }}
-                  >
-                    {(Number(it.price) * Number(it.quantity)).toFixed(3)}
-                  </td>
-                  <td
-                    style={{
-                      padding: 8,
-                      borderBottom: "1px solid #f1f1f1",
-                    }}
-                  >
-                    <select
-                      value={assign[idx] ?? ""}
-                      onChange={(e) => {
-                        const val =
-                          e.target.value === "" ? null : Number(e.target.value);
-                        setAssign((a) => ({ ...a, [idx]: val }));
-                      }}
-                      style={{
-                        border: "1px solid #ddd",
-                        borderRadius: 8,
-                        padding: "6px 8px",
-                      }}
-                    >
-                      <option value="">— Unassigned —</option>
-                      {people.map((p, pIdx) => (
-                        <option key={pIdx} value={pIdx}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
-              ))}
+              {data.items.map((it, idx) => {
+                const sArr = Array.isArray(shares[idx]) ? shares[idx] : Array(people.length).fill(0);
+                const sumShares = sArr.reduce((a, b) => a + (Number(b) || 0), 0);
+                const remaining = Math.max(0, Number(it.quantity) - sumShares);
+                return (
+                  <React.Fragment key={idx}>
+                    <tr>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {Number(it.quantity).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {Number(it.price).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {(Number(it.price) * Number(it.quantity)).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>
+                        {/* Single owner fallback */}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <select
+                            value={assign[idx] ?? ""}
+                            onChange={(e) => {
+                              const val = e.target.value === "" ? null : Number(e.target.value);
+                              setAssign((a) => ({ ...a, [idx]: val }));
+                              // clear shares if single-owner chosen
+                              if (val != null) {
+                                setShares((prev) => {
+                                  const n = { ...prev };
+                                  delete n[idx];
+                                  return n;
+                                });
+                              }
+                            }}
+                            style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 8px" }}
+                          >
+                            <option value="">— Single owner —</option>
+                            {people.map((p, pIdx) => (
+                              <option key={pIdx} value={pIdx}>{p}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            onClick={() => evenSplitItem(idx, Number(it.quantity))}
+                            style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+                            title="Split this item evenly across people"
+                          >
+                            Split evenly
+                          </button>
+
+                          <button
+                            onClick={() => clearItemSplit(idx)}
+                            style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+                          >
+                            Clear
+                          </button>
+                        </div>
+
+                        {/* Partial quantities matrix */}
+                        <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                          {people.map((p, pIdx) => (
+                            <div key={pIdx} style={{ display: "flex", flexDirection: "column" }}>
+                              <label style={{ fontSize: 12, color: "#555" }}>{p}</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={String(sArr[pIdx] ?? 0)}
+                                onChange={(e) =>
+                                  setShareQty(idx, pIdx, e.target.value, Number(it.quantity))
+                                }
+                                onFocus={() => {
+                                  // switching to partial split clears single-owner for this item
+                                  setAssign((a) => {
+                                    const n = { ...a };
+                                    delete n[idx];
+                                    return n;
+                                  });
+                                }}
+                                style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 8px" }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12, color: remaining === 0 ? "#2e7d32" : "#b00020" }}>
+                          {remaining.toFixed(3)} qty remaining to allocate
+                        </div>
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
 
