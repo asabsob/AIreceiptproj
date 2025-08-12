@@ -10,6 +10,27 @@ const BACKEND_URL = isDev
 
 const PUBLIC_ORIGIN =
   import.meta.env.VITE_PUBLIC_ORIGIN || window.location.origin;
+const [room, setRoom] = useState(null);
+const [creating, setCreating] = useState(false);
+
+async function startLiveSplit() {
+  if (!result || creating) return;
+  setCreating(true);
+  try {
+    const { data } = await axios.post(
+      `${BACKEND_URL}/session`,
+      { data: result },
+      { timeout: 20000 }
+    );
+    // data = { id, joinUrl }
+    setRoom(data);
+  } catch (e) {
+    console.error(e);
+    alert("Couldn't start live split. Try again.");
+  } finally {
+    setCreating(false);
+  }
+}
 
 if (!isDev && !BACKEND_URL) {
   console.error("VITE_BACKEND_URL is missing in production build.");
@@ -75,11 +96,13 @@ const service =
     : 0;
 
   // Always share to public domain (HashRouter format)
-  const shareUrl = result
-    ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
-        btoa(JSON.stringify(result))
-      )}`
-    : "";
+const shareUrl = room?.joinUrl
+  ? room.joinUrl
+  : result
+  ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
+      btoa(JSON.stringify(result))
+    )}`
+  : "";
 
   return (
     <div style={{ background: "#fafafa", minHeight: "100vh" }}>
@@ -384,6 +407,32 @@ const service =
             )}
           </div>
         </div>
+<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+  {/* existing Copy/Open buttons ... */}
+
+  {!room && (
+    <button
+      onClick={startLiveSplit}
+      disabled={creating}
+      style={{
+        padding: "6px 10px",
+        border: "1px solid #111",
+        borderRadius: 8,
+        cursor: creating ? "not-allowed" : "pointer",
+        background: "#111",
+        color: "#fff",
+      }}
+      title="Create a live room so friends can join and split together"
+    >
+      {creating ? "Starting…" : "Start live split"}
+    </button>
+  )}
+  {room && (
+    <span style={{ fontSize: 13, color: "#2e7d32" }}>
+      Live room <b>{room.id}</b> created ✓
+    </span>
+  )}
+</div>
 
         <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
           Backend URL: <code>{BACKEND_URL}</code> (override with{" "}
