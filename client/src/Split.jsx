@@ -11,28 +11,102 @@ function useReceiptData() {
       const jsonStr = atob(decodeURIComponent(enc));
       const parsed = JSON.parse(jsonStr);
 
+      // 1) Base normalize
       const items = Array.isArray(parsed.items) ? parsed.items : [];
-      const normalized = items.map((it) => ({
+      let normalized = items.map((it) => ({
         name: String(it?.name ?? "").trim(),
-        quantity: Math.max(1e-9, Number(it?.quantity ?? 1) || 1), // allow fractional qty
-        price: Number(it?.price ?? it?.unit_price ?? 0) || 0,
+        quantity: Math.max(1e-9, Number(it?.quantity ?? 1) || 1),
+        price: Number(it?.price ?? it?.unit_price ?? 0) || 0, // may be unit OR line total
       }));
 
-      const subtotal =
-        parsed.subtotal ??
-        normalized.reduce(
-          (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
-          0
-        );
-      const tax = parsed.tax != null ? Number(parsed.tax) : null;
-      const total =
-        parsed.total != null
-          ? Number(parsed.total)
-          : tax != null
-          ? Number(subtotal) + Number(tax)
-          : Number(subtotal);
+      const printedSubtotal = Number(parsed.subtotal ?? 0) || null;
+      const printedTax = parsed.tax != null ? Number(parsed.tax) : null;
+      const printedTotal =
+        parsed.total != null ? Number(parsed.total) : null;
 
-      return { items: normalized, subtotal, tax, total };
+      // 2) Detect if price is line total, not unit: compare sums
+      const sumUnitGuess = normalized.reduce(
+        (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+        0
+      );
+      const sumAsLines = normalized.reduce(
+        (a, it) => a + (Number(it.price) || 0),
+        0
+      );
+
+      let targetBase =
+        printedSubtotal ??
+        (printedTotal != null && printedTax != null
+          ? printedTotal - printedTax
+          : null);
+
+      // If printed subtotal exists, prefer it as truth
+      if (targetBase != null) {
+        const diffUnit = Math.abs(sumUnitGuess - targetBase);
+        const diffLines = Math.abs(sumAsLines - targetBase);
+        // If prices look like line totals, convert to unit prices
+        if (diffLines + 1e-6 < diffUnit) {
+          normalized = normalized.map((it) => ({
+            ...it,
+            price: (Number(it.price) || 0) / (Number(it.quantity) || 1),
+          }));
+        }
+      } else {
+        // No printed subtotal; if quantities>1 exist and prices look like lines, convert anyway
+        if (sumAsLines > 0 && sumAsLines + 1e-6 < sumUnitGuess) {
+          normalized = normalized.map((it) => ({
+            ...it,
+            price: (Number(it.price) || 0) / (Number(it.quantity) || 1),
+          }));
+        }
+      }
+
+      // 3) Recompute base and softly scale to match printed subtotal/total
+      let computedBase = normalized.reduce(
+        (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+        0
+      );
+      if (targetBase == null && printedTotal != null) {
+        // derive target base from total if tax known or zero
+        targetBase =
+          printedTax != null ? printedTotal - printedTax : printedTotal;
+      }
+      if (targetBase != null && computedBase > 0) {
+        const ratio = targetBase / computedBase;
+        // Only scale if off by more than ~2%
+        if (Math.abs(1 - ratio) > 0.02) {
+          normalized = normalized.map((it) => ({
+            ...it,
+            price: +(Number(it.price) * ratio).toFixed(6), // keep precision, round later
+          }));
+          computedBase = normalized.reduce(
+            (a, x) => a + x.price * x.quantity,
+            0
+          );
+        }
+      }
+
+      // 4) Final numbers (3-decimals like JOD)
+      const subtotal =
+        printedSubtotal != null ? +printedSubtotal : +computedBase.toFixed(3);
+      let tax =
+        printedTax != null
+          ? +printedTax
+          : printedTotal != null
+          ? +(printedTotal - subtotal).toFixed(3)
+          : null;
+      let total =
+        printedTotal != null
+          ? +printedTotal
+          : +(subtotal + (tax || 0)).toFixed(3);
+
+      // Round unit prices to 3dp for display; keep sums consistent
+      const rounded = normalized.map((it) => ({
+        ...it,
+        price: +Number(it.price).toFixed(3),
+      }));
+
+      return { items: rounded, subtotal, tax, total };
     } catch {
       return null;
     }
