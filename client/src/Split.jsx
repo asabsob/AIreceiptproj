@@ -6,10 +6,11 @@ function useReceiptData() {
   const { search } = useLocation(); // HashRouter puts ?... after #
   return useMemo(() => {
     try {
-      const enc = new URLSearchParams(search).get("data");
-      if (!enc) return null;
-      const jsonStr = atob(decodeURIComponent(enc));
-      const parsed = JSON.parse(jsonStr);
+     const enc = new URLSearchParams(search).get("data");
+if (!enc) return null;
+const jsonStr = fromBase64Unicode(decodeURIComponent(enc));
+const parsed = JSON.parse(jsonStr);
+
 
       // 1) Base normalize
       const items = Array.isArray(parsed.items) ? parsed.items : [];
