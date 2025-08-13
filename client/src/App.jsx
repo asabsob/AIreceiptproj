@@ -96,13 +96,28 @@ export default function App() {
       )
     : 0;
 
-  const shareUrl = useMemo(() => {
-    if (room?.joinUrl) return room.joinUrl;
-    if (!result) return "";
-    return `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
-      btoa(JSON.stringify(result))
-    )}`;
-  }, [room, result]);
+function toBase64Unicode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function fromBase64Unicode(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+  const shareUrl = room?.joinUrl
+  ? room.joinUrl
+  : result
+  ? `${PUBLIC_ORIGIN}/#/split?data=${encodeURIComponent(
+      toBase64Unicode(JSON.stringify(result))
+    )}`
+  : "";
+
 
   return (
     <div style={{ background: "#fafafa", minHeight: "100vh" }}>
