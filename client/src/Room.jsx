@@ -65,6 +65,19 @@ export default function Room() {
   const tax = data.tax ?? data.data?.tax ?? null;
   const total = data.total ?? data.data?.total ?? null;
 
+// helper to encode Unicode safely
+function toBase64Unicode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+const payload = { items, subtotal, tax, total };
+const splitUrl = `${window.location.origin}/#/split?data=${encodeURIComponent(
+  toBase64Unicode(JSON.stringify(payload))
+)}`;
+
   return (
     <div style={{ padding: 16, fontFamily: "system-ui, sans-serif", maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>

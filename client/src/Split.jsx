@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 // --- helpers ---
+function fromBase64Unicode(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 function useReceiptData() {
   const { search } = useLocation(); // HashRouter puts ?... after #
   return useMemo(() => {
