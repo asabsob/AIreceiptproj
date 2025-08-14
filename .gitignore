@@ -1,0 +1,8 @@
+# Node / Vite
+node_modules
+dist
+*.log
+.vscode
+.DS_Store
+.vercel
+.env
