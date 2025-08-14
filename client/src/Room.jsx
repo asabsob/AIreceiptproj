@@ -150,6 +150,21 @@ export default function Room() {
           </div>
         )}
       </div>
+<div style={{ marginTop: 16 }}>
+  <a
+    href={`#/live/${data.id}`}
+    style={{
+      padding: "8px 12px",
+      border: "1px solid #111",
+      borderRadius: 8,
+      textDecoration: "none",
+      background: "#111",
+      color: "#fff"
+    }}
+  >
+    Join live split
+  </a>
+</div>
 
       {/* Open interactive split */}
       <div style={{ marginTop: 16 }}>
