@@ -34,7 +34,8 @@ export default function Room() {
   return (
     <div style={{ background: "#fff", minHeight: "100vh" }}>
       <Header />
-      <div style={{ padding: 16, fontFamily: "system-ui, sans-serif", maxWidth: 1000, margin: "0 auto" }}>
+      <div style={{padding:16}}>
+      Room {id} OK &nbsp; <Link to="/">← Back</Link>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h2 style={{ margin: 0 }}>Room {id}</h2>
           <Link to="/" style={{ fontSize: 14 }}>← Back</Link>

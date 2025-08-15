@@ -7,6 +7,8 @@ const BACKEND_URL = isDev
   : (import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app");
 
 export default function Upload() {
+  return <div style={{padding:16}}>Upload page OK</div>;
+}
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
