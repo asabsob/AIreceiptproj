@@ -1,173 +1,245 @@
-import React, { useState, useMemo } from "react";
-import Header from "../components/Header.jsx";
+import React, { useState } from "react";
+import axios from "axios";
+import { Link } from "react-router-dom";
 
+// Backend URL
 const isDev = import.meta.env.DEV;
-const BACKEND_URL = isDev
-  ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
-  : (import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app");
+const API_BASE = isDev
+  ? import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"
+  : import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app";
 
 export default function Upload() {
-  return <div style={{padding:16}}>Upload page OK</div>;
-}
   const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [preview, setPreview] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [err, setErr] = useState("");
+  const [error, setError] = useState("");
   const [room, setRoom] = useState(null);
-  const [spinningRoom, setSpinningRoom] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const onFile = (e) => {
     const f = e.target.files?.[0];
+    setResult(null);
+    setError("");
     if (!f) return;
     setFile(f);
     setPreview(URL.createObjectURL(f));
-    setErr("");
-    setResult(null);
-    setRoom(null);
   };
 
   const handleParse = async () => {
-    if (!file) return;
-    setLoading(true); setErr("");
+    if (!file) {
+      setError("Choose an image first.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setResult(null);
     try {
       const form = new FormData();
       form.append("file", file);
-      const r = await fetch(`${BACKEND_URL}/parse`, { method: "POST", body: form });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const json = await r.json();
-      setResult(json);
-    } catch (e) {
-      setErr(e.message || "Parse failed");
+      const { data } = await axios.post(`${API_BASE}/parse`, form, { timeout: 60000 });
+      setResult(data);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err?.response?.data?.error ||
+          err?.message ||
+          "Failed to parse. Check backend URL and CORS."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const startRoom = async () => {
-    if (!result || spinningRoom) return;
-    setSpinningRoom(true);
+    if (!result || creating) return;
+    setCreating(true);
     try {
-      const r = await fetch(`${BACKEND_URL}/session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: result }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const json = await r.json(); // { id, joinUrl }
-      setRoom(json);
+      const { data } = await axios.post(`${API_BASE}/session`, { data: result }, { timeout: 20000 });
+      setRoom(data); // { id, joinUrl }
     } catch (e) {
-      alert("Could not create live room. Try again.");
       console.error(e);
+      alert("Couldn't start a room. Try again.");
     } finally {
-      setSpinningRoom(false);
+      setCreating(false);
     }
   };
 
-  const computedSubtotal = useMemo(() => {
-    if (!result?.items) return 0;
-    return result.items.reduce((a, it) => a + (Number(it.price)||0)*(Number(it.quantity)||1), 0);
-  }, [result]);
+  const totalCalc =
+    result?.items?.reduce(
+      (a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+      0
+    ) ?? 0;
+
+  const service =
+    result
+      ? Math.max(
+          0,
+          Number(result.total ?? 0) -
+            Number(result.subtotal ?? 0) -
+            Number(result.tax ?? 0)
+        )
+      : 0;
 
   return (
-    <div style={{ background: "#fff", minHeight: "100vh" }}>
-      <Header />
-      <div style={{ maxWidth: 1100, margin: "24px auto", padding: 16, fontFamily: "system-ui, sans-serif" }}>
-        <h1 style={{ margin: 0 }}>Upload a receipt</h1>
-        <p style={{ color: "#666", marginTop: 6 }}>
-          Choose an image → we parse it on the server → view or share a live room.
-        </p>
+    <div style={{ maxWidth: 1100, margin: "32px auto", padding: 16, fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1 style={{ margin: 0 }}>AIReceiptPro</h1>
+        <span style={{ fontSize: 13, color: "#777" }}>
+          Backend: <code>{API_BASE}</code>
+        </span>
+      </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
-          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
-            <label htmlFor="file" style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>
-              Receipt image
-            </label>
-            <input id="file" type="file" accept="image/*" onChange={onFile} />
-            {preview && (
-              <div style={{ marginTop: 12 }}>
-                <img src={preview} alt="preview" style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #eee" }}/>
+      <p style={{ color: "#666", marginTop: 8 }}>
+        Upload a receipt → parse with AI → (optional) start a live room to share.
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+        {/* left */}
+        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
+          <label htmlFor="file" style={{ display: "block", marginBottom: 8, fontWeight: 600 }}>
+            Receipt image
+          </label>
+          <input id="file" type="file" accept="image/*" onChange={onFile} />
+          {preview && (
+            <div style={{ marginTop: 12 }}>
+              <img
+                src={preview}
+                alt="preview"
+                style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #eee" }}
+              />
+            </div>
+          )}
+          <button
+            onClick={handleParse}
+            disabled={loading || !file}
+            style={{
+              marginTop: 12,
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Parsing…" : "Parse receipt"}
+          </button>
+          {error && <div style={{ marginTop: 12, color: "#b00020", fontWeight: 600 }}>{error}</div>}
+        </div>
+
+        {/* right */}
+        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16, minHeight: 200 }}>
+          <h3 style={{ marginTop: 0 }}>Parsed result</h3>
+          {!result && <div style={{ color: "#777" }}>No data yet.</div>}
+
+          {result && (
+            <>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Item</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Qty</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Price</th>
+                    <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Line Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.items?.map((it, idx) => (
+                    <tr key={idx}>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {Number(it.quantity || 1).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {Number(it.price || 0).toFixed(3)}
+                      </td>
+                      <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                        {((Number(it.price) || 0) * (Number(it.quantity) || 1)).toFixed(3)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>Subtotal</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>
+                      {Number(result.subtotal ?? totalCalc).toFixed(3)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right" }}>Service</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{service.toFixed(3)}</td>
+                  </tr>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>
+                      {result.tax != null ? Number(result.tax).toFixed(3) : "-"}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td />
+                    <td />
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>Total</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>
+                      {Number(result.total ?? totalCalc).toFixed(3)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <div style={{ marginTop: 16, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {!room && (
+                  <button
+                    onClick={startRoom}
+                    disabled={creating}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #111",
+                      background: "#111",
+                      color: "#fff",
+                      cursor: creating ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {creating ? "Starting…" : "Start live room"}
+                  </button>
+                )}
+                {room && (
+                  <>
+                    <span style={{ fontSize: 13, color: "#2e7d32" }}>
+                      Room <b>{room.id}</b> created ✓
+                    </span>
+                    <a
+                      href={room.joinUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}
+                    >
+                      Open room
+                    </a>
+                  </>
+                )}
               </div>
-            )}
-            <button onClick={handleParse} disabled={loading || !file}
-              style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: loading||!file ? "not-allowed":"pointer" }}>
-              {loading ? "Parsing…" : "Parse"}
-            </button>
-            {err && <div style={{ marginTop: 10, color: "#b00020", fontWeight: 600 }}>{err}</div>}
-          </div>
 
-          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
-            <h3 style={{ marginTop: 0 }}>Parsed result</h3>
-            {!result && <div style={{ color: "#777" }}>No data yet.</div>}
-            {result && (
-              <>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th style="text-align:left;border-bottom:1px solid #ddd;padding:8px">Item</th>
-                      <th style="text-align:right;border-bottom:1px solid #ddd;padding:8px">Qty</th>
-                      <th style="text-align:right;border-bottom:1px solid #ddd;padding:8px">Price</th>
-                      <th style="text-align:right;border-bottom:1px solid #ddd;padding:8px">Line total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.items?.map((it, idx) => (
-                      <tr key={idx}>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>{Number(it.quantity||1).toFixed(3)}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>{Number(it.price||0).toFixed(3)}</td>
-                        <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
-                          {((Number(it.price)||0) * (Number(it.quantity)||1)).toFixed(3)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td />
-                      <td />
-                      <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>Subtotal</td>
-                      <td style={{ padding: 8, textAlign: "right", fontWeight: 600 }}>{Number(result.subtotal ?? computedSubtotal).toFixed(3)}</td>
-                    </tr>
-                    <tr>
-                      <td />
-                      <td />
-                      <td style={{ padding: 8, textAlign: "right" }}>Tax</td>
-                      <td style={{ padding: 8, textAlign: "right" }}>{result.tax != null ? Number(result.tax).toFixed(3) : "-"}</td>
-                    </tr>
-                    <tr>
-                      <td />
-                      <td />
-                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>Total</td>
-                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{Number(result.total ?? computedSubtotal).toFixed(3)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-
-                <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {!room ? (
-                    <button onClick={startRoom} disabled={spinningRoom}
-                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #111", background: "#111", color: "#fff", cursor: spinningRoom ? "not-allowed" : "pointer" }}>
-                      {spinningRoom ? "Creating…" : "Start live room"}
-                    </button>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 13, color: "#2e7d32" }}>Room <b>{room.id}</b> created ✓</span>
-                      <a href={room.joinUrl} target="_blank" rel="noreferrer"
-                        style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, textDecoration: "none" }}>
-                        Open Room
-                      </a>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+              <details style={{ marginTop: 12 }}>
+                <summary>Raw JSON</summary>
+                <pre style={{ whiteSpace: "pre-wrap", background: "#fafafa", padding: 12, borderRadius: 8 }}>
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              </details>
+            </>
+          )}
         </div>
+      </div>
 
-        <div style={{ marginTop: 16, fontSize: 13, color: "#777" }}>
-          BACKEND_URL: <code>{BACKEND_URL}</code>
-        </div>
+      <div style={{ marginTop: 16, fontSize: 13 }}>
+        Tip: set <code>VITE_BACKEND_URL</code> in Vercel to your Railway URL.
+        &nbsp; <Link to="/room/TEST">Sample room link</Link>
       </div>
     </div>
   );
