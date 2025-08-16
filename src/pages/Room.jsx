@@ -13,14 +13,15 @@ export default function Room() {
   const roomId = id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
 
   const [err, setErr] = useState("");
-  const [data, setData] = useState(null);     // { items, subtotal, tax, total }
-  const [claims, setClaims] = useState([]);   // Array<{ [userId]: number }>
-  const [names, setNames] = useState({});     // { [userId]: string }
+  const [data, setData] = useState(null);       // { items, subtotal?, tax?, total? }
+  const [claims, setClaims] = useState([]);     // Array<{ [userId]: number }>
+  const [names, setNames]   = useState({});     // { [userId]: string }
   const [presence, setPresence] = useState(0);
-  const [youId, setYouId] = useState(null);   // <- your actual socket id
+
+  const [youId, setYouId] = useState(null);
+  const [connected, setConnected] = useState(false);
   const socketRef = useRef(null);
 
-  // sticky display name saved once
   const [displayName] = useState(() => {
     const saved = localStorage.getItem("displayName");
     if (saved) return saved;
@@ -29,49 +30,50 @@ export default function Room() {
     return n;
   });
 
-  // -------- helpers ----------
+  // ---- helpers ----
   const normClaims = (c) =>
-    Array.isArray(c) ? c.map((row) => (row && typeof row === "object" ? row : {})) : [];
+    Array.isArray(c) ? c.map((row) => (row && typeof row === "object" && !Array.isArray(row) ? row : {})) : [];
 
-  const entries = (row) =>
-    row && typeof row === "object"
-      ? Object.entries(row) // server sends plain object {uid: qty}
-      : [];
+  const safeEntries = (row) =>
+    row && typeof row === "object" && !Array.isArray(row) ? Object.entries(row) : [];
 
+  // Treat price as **line total**; divide by quantity to get **unit**
   const getUnit = (it) => {
     const qty = Math.max(0, Number(it?.quantity ?? 1));
-    const price = Number(it?.price ?? 0);
-    // You asked to divide line price across quantity (treat price as line total)
-    return qty > 0 ? price / qty : 0;
+    const line = Number(it?.price ?? 0);
+    return qty > 0 ? line / qty : 0;
   };
 
-  // -------- initial fetch (static receipt data) ----------
+  // ---- initial fetch ----
   useEffect(() => {
     if (!roomId) return;
     setErr("");
     fetch(`${API_BASE}/session/${roomId}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((json) => setData(json.data ?? json))
       .catch((e) => setErr(e.message));
   }, [roomId]);
 
-  // -------- socket connection ----------
+  // ---- sockets ----
   useEffect(() => {
     if (!roomId) return;
     const s = io(API_BASE, {
       withCredentials: false,
-      // path: "/socket.io", // keep default; set only if server changed it
-      transports: ["polling", "websocket"],   // be flexible on Railway
+      transports: ["websocket", "polling"], // try ws, fall back to polling
+      // path: "/socket.io", // use default unless you changed it server-side
     });
     socketRef.current = s;
 
-    s.on("connect", () => {
-      setYouId(s.id); // <-- use real socket id, fixes “selection not active”
+    const onConnect = () => {
+      setConnected(true);
+      setYouId(s.id);
       s.emit("join", { roomId, name: displayName });
-    });
+    };
+    const onDisconnect = () => setConnected(false);
+
+    s.on("connect", onConnect);
+    s.on("disconnect", onDisconnect);
+    s.on("connect_error", (e) => console.error("socket connect_error:", e?.message || e));
 
     s.on("room:error", ({ code }) => setErr(code || "room-error"));
 
@@ -94,7 +96,7 @@ export default function Room() {
     return () => s.disconnect();
   }, [roomId, displayName]);
 
-  // -------- rendering guards ----------
+  // ---- guards ----
   if (!roomId) {
     return (
       <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>
@@ -113,19 +115,14 @@ export default function Room() {
       </div>
     );
   }
-  if (!data) {
-    return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
-  }
+  if (!data) return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
 
   const items = Array.isArray(data.items) ? data.items : [];
   const subtotalPrinted = Number.isFinite(+data.subtotal) ? Number(data.subtotal) : null;
-  const totalPrinted = Number.isFinite(+data.total) ? Number(data.total) : null;
+  const totalPrinted    = Number.isFinite(+data.total)    ? Number(data.total)    : null;
 
-  // -------- claim math ----------
-  const sumClaims = (idx) => {
-    const row = claims[idx] || {};
-    return entries(row).reduce((a, [, q]) => a + (Number(q) || 0), 0);
-  };
+  // ---- claim math ----
+  const sumClaims = (idx) => safeEntries(claims[idx] || {}).reduce((a, [, q]) => a + (Number(q) || 0), 0);
 
   const remaining = (idx) => {
     const qty = Number(items[idx]?.quantity ?? 1);
@@ -138,73 +135,77 @@ export default function Room() {
     return Number(row[youId] || 0);
   };
 
-  const rowTakenByOtherWhenSingle = (idx) => {
+  // For qty === 1 lines, lock for others once someone has it
+  const takenByOtherSingle = (idx) => {
     const qty = Number(items[idx]?.quantity ?? 1);
     if (qty > 1) return false;
     const row = claims[idx] || {};
-    const taken = entries(row);
-    if (taken.length === 0) return false;
-    if (taken.length === 1) {
-      const [uid, q] = taken[0];
-      return uid !== youId && q > 0;
+    const ent = safeEntries(row);
+    if (ent.length === 0) return false;
+    if (!youId) return true; // until we know who we are, be conservative
+    if (ent.length === 1) {
+      const [uid, q] = ent[0];
+      return uid !== youId && (Number(q) || 0) > 0;
     }
     return true;
   };
 
   const claimOne = (idx) => {
+    if (!connected) return;
     socketRef.current?.emit("room:claim", { index: idx, qty: 1 }, (res) => {
       if (!res?.ok) console.warn("claim failed:", res?.error);
     });
   };
-
   const unclaimOne = (idx) => {
+    if (!connected) return;
     socketRef.current?.emit("room:unclaim", { index: idx, qty: 1 }, (res) => {
       if (!res?.ok) console.warn("unclaim failed:", res?.error);
     });
   };
 
-  // -------- totals per person (pro-rated fees) ----------
+  // ---- per-user totals (with fee/tax proration), hardened against crashes ----
   const perUserTotals = useMemo(() => {
-    const userBase = {}; // userId -> base (sum of unit * claimedQty)
-    let baseSum = 0;
+    try {
+      const userBase = {}; // userId -> base sum
+      let baseSum = 0;
 
-    items.forEach((it, idx) => {
-      const unit = getUnit(it);
-      const row = claims[idx] || {};
-      entries(row).forEach(([uid, q]) => {
-        const qty = Number(q) || 0;
-        if (!userBase[uid]) userBase[uid] = 0;
-        userBase[uid] += unit * qty;
-        baseSum += unit * qty;
+      items.forEach((it, idx) => {
+        const unit = getUnit(it);
+        const row = claims[idx] || {};
+        safeEntries(row).forEach(([uid, q]) => {
+          const qty = Number(q) || 0;
+          userBase[uid] = (userBase[uid] || 0) + unit * qty;
+          baseSum += unit * qty;
+        });
       });
-    });
 
-    // compute global fees to pro-rate (use printed total/subtotal when available)
-    const subtotal =
-      subtotalPrinted != null
-        ? subtotalPrinted
-        : items.reduce((a, it) => a + getUnit(it) * (Number(it.quantity ?? 1)), 0);
+      const subtotal =
+        subtotalPrinted != null
+          ? subtotalPrinted
+          : items.reduce((a, it) => a + getUnit(it) * (Number(it.quantity ?? 1)), 0);
 
-    const total =
-      totalPrinted != null
-        ? totalPrinted
-        : subtotal;
+      const total =
+        totalPrinted != null
+          ? totalPrinted
+          : subtotal;
 
-    const fees = Math.max(0, +(total - subtotal).toFixed(3));
+      const fees = Math.max(0, +(total - subtotal).toFixed(3));
 
-    const out = {};
-    const uids = Object.keys(userBase);
-    if (uids.length === 0) return out;
-
-    uids.forEach((uid) => {
-      const base = userBase[uid];
-      const feeShare = baseSum > 0 ? (fees * (base / baseSum)) : (fees / uids.length);
-      out[uid] = +(base + feeShare).toFixed(3);
-    });
-    return out;
+      const out = {};
+      const uids = Object.keys(userBase);
+      for (const uid of uids) {
+        const base = userBase[uid];
+        const feeShare = baseSum > 0 ? (fees * (base / baseSum)) : (uids.length ? fees / uids.length : 0);
+        out[uid] = +(base + feeShare).toFixed(3);
+      }
+      return out;
+    } catch (e) {
+      console.error("perUserTotals failed:", e);
+      return {};
+    }
   }, [claims, items, subtotalPrinted, totalPrinted]);
 
-  const yourTotal = youId && perUserTotals[youId] ? perUserTotals[youId] : 0;
+  const yourTotal = youId && Number.isFinite(+perUserTotals[youId]) ? perUserTotals[youId] : 0;
 
   const joinUrl = window.location.href;
 
@@ -215,7 +216,8 @@ export default function Room() {
         <div>
           <h2 style={{ margin:0 }}>Live room {roomId}</h2>
           <div style={{ color:"#666", fontSize:13 }}>
-            People online: <b>{presence || "-"}</b> • You are <b>{displayName}</b>
+            People online: <b>{presence || "-"}</b> • You are <b>{displayName}</b> • Socket:{" "}
+            <b style={{ color: connected ? "#2e7d32" : "#b00020" }}>{connected ? "connected" : "connecting…"}</b>
           </div>
         </div>
         <Link to="/" style={{ fontSize:14 }}>← Back</Link>
@@ -256,33 +258,27 @@ export default function Room() {
         <tbody>
           {items.map((it, idx) => {
             const unit = getUnit(it);
-            const qty = Number(it.quantity ?? 1);
-            const row = claims[idx] || {};
+            const qty  = Number(it.quantity ?? 1);
+            const row  = claims[idx] || {};
             const left = remaining(idx);
-            const my = mineQty(idx);
+            const my   = mineQty(idx);
 
             const single = qty <= 1;
-            const takenByOther = rowTakenByOtherWhenSingle(idx);
+            const lockedByOther = takenByOtherSingle(idx);
 
-            const canTake = single ? (!takenByOther && left > 0) : left > 0;
-            const canDrop = my > 0;
+            const canTake = connected && (single ? (!lockedByOther && left > 0) : left > 0);
+            const canDrop = connected && my > 0;
 
             return (
               <tr key={idx}>
                 <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>{it.name}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  {qty.toFixed(3)}
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  {unit.toFixed(3)}
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  {(unit * qty).toFixed(3)}
-                </td>
+                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{qty.toFixed(3)}</td>
+                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{unit.toFixed(3)}</td>
+                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{(unit * qty).toFixed(3)}</td>
                 <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>
                   <div style={{ fontSize:13 }}>
-                    {entries(row).length === 0 && <span style={{ color:"#777" }}>—</span>}
-                    {entries(row).map(([uid, q]) => (
+                    {safeEntries(row).length === 0 && <span style={{ color:"#777" }}>—</span>}
+                    {safeEntries(row).map(([uid, q]) => (
                       <div key={uid}><b>{names[uid] || uid}</b>: {Number(q).toFixed(3)}</div>
                     ))}
                     <div style={{ marginTop:4, color: left === 0 ? "#2e7d32" : "#b06a00" }}>
@@ -295,7 +291,11 @@ export default function Room() {
                     <button
                       onClick={() => claimOne(idx)}
                       disabled={!canTake}
-                      title={canTake ? (single ? "Claim this item" : "Claim 1 unit") : "No units left"}
+                      title={
+                        connected
+                          ? (single ? "Claim this item" : "Claim 1 unit")
+                          : "Connecting…"
+                      }
                       style={{
                         padding:"6px 10px",
                         border:"1px solid #ddd",
@@ -310,7 +310,7 @@ export default function Room() {
                     <button
                       onClick={() => unclaimOne(idx)}
                       disabled={!canDrop}
-                      title={canDrop ? (single ? "Release" : "Return 1 unit") : "You have none"}
+                      title={connected ? (single ? "Release" : "Return 1 unit") : "Connecting…"}
                       style={{
                         padding:"6px 10px",
                         border:"1px solid #ddd",
@@ -330,13 +330,7 @@ export default function Room() {
       </table>
 
       {/* totals */}
-      <div style={{
-        marginTop:16,
-        border:"1px solid #eee",
-        borderRadius:12,
-        padding:12,
-        maxWidth:520
-      }}>
+      <div style={{ marginTop:16, border:"1px solid #eee", borderRadius:12, padding:12, maxWidth:520 }}>
         <h3 style={{ marginTop:0 }}>Totals (incl. pro-rated fees/tax)</h3>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
           {Object.keys(perUserTotals).length === 0 && (
@@ -345,13 +339,13 @@ export default function Room() {
           {Object.entries(perUserTotals).map(([uid, amt]) => (
             <div key={uid} style={{ display:"flex", justifyContent:"space-between" }}>
               <span>{names[uid] || uid}{uid === youId ? " (you)" : ""}</span>
-              <b>{amt.toFixed(3)}</b>
+              <b>{(Number(amt)||0).toFixed(3)}</b>
             </div>
           ))}
         </div>
         {youId && (
           <div style={{ marginTop:8, fontSize:13, color:"#333" }}>
-            Your current total: <b>{yourTotal.toFixed(3)}</b>
+            Your current total: <b>{(Number(yourTotal)||0).toFixed(3)}</b>
           </div>
         )}
       </div>
