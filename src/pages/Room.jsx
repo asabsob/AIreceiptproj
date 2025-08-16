@@ -1,226 +1,272 @@
-import React, { useEffect, useRef, useState } from "react";
+// src/pages/Room.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { io } from "socket.io-client";
 import { QRCodeCanvas } from "qrcode.react";
+import { normalizeReceipt } from "../lib/normalize.js";
 
 const isDev = import.meta.env.DEV;
-const API_BASE = isDev
-  ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
-  : (import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app");
+const BACKEND_URL = isDev
+  ? import.meta.env.VITE_BACKEND_URL || "http://localhost:5000"
+  : import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app";
 
 export default function Room() {
-  const { id } = useParams();
-  const roomId = id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
+  const { id: paramId } = useParams();
+  const roomId = useMemo(
+    () => paramId || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? ""),
+    [paramId]
+  );
 
+  const [receipt, setReceipt] = useState(null); // { items[ {price(unit), quantity} ], subtotal, tax, total }
   const [err, setErr] = useState("");
-  const [data, setData] = useState(null);     // { items, subtotal, tax, total }
-  const [claims, setClaims] = useState([]);   // array of per-item { userId: qty }
-  const [names, setNames] = useState({});     // { userId: name }
-  const [presence, setPresence] = useState(0);
-  const socketRef = useRef(null);
+  const [socketId, setSocketId] = useState("");
+  const [claims, setClaims] = useState([]);     // Array< { [uid]: qty } >
+  const [names, setNames] = useState({});       // { uid: displayName }
+  const [peers, setPeers] = useState(1);
 
-  const [displayName] = useState(() => {
-    const saved = localStorage.getItem("displayName");
-    if (saved) return saved;
-    const n = "Guest-" + Math.random().toString(36).slice(2, 6);
-    localStorage.setItem("displayName", n);
-    return n;
-  });
-
-  // load static room data
+  // Fetch room payload (immutable)
   useEffect(() => {
     if (!roomId) return;
-    fetch(`${API_BASE}/session/${roomId}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then(json => setData(json.data ?? json))
-      .catch(e => setErr(e.message));
+    setErr("");
+    fetch(`${BACKEND_URL}/session/${roomId}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((json) => {
+        const norm = normalizeReceipt(json.data || json); // normalize to ensure unit prices
+        setReceipt({ id: json.id, ...norm });
+      })
+      .catch((e) => setErr(e.message));
   }, [roomId]);
 
-  // socket connection
+  // Socket live state
   useEffect(() => {
     if (!roomId) return;
-    const s = io(API_BASE, {
-      // let socket.io choose transports (polling->ws). Avoid forcing websocket.
-      withCredentials: false,
-      // path: "/socket.io", // only set if you changed it on server
-    });
-    socketRef.current = s;
+    const s = io(BACKEND_URL, { transports: ["websocket"] });
 
-    s.on("connect", () => {
-      s.emit("join", { roomId, name: displayName });
+    s.on("connect", () => setSocketId(s.id));
+    s.emit("join", { roomId, name: "" });
+
+    s.on("room:state", (snap) => {
+      // snap.data is the immutable receipt shape
+      const norm = normalizeReceipt(snap.data || {});
+      setReceipt({ id: snap.id, ...norm });
+
+      // live: claims & names may be plain objects from server
+      setClaims(Array.isArray(snap.live?.claims) ? snap.live.claims : []);
+      setNames(snap.live?.names || {});
+    });
+
+    s.on("room:live", (live) => {
+      setClaims(Array.isArray(live?.claims) ? live.claims : []);
+      setNames(live?.names || {});
+    });
+
+    s.on("room:presence", ({ count, live }) => {
+      setPeers(count || 1);
+      if (live?.names) setNames(live.names);
     });
 
     s.on("room:error", ({ code }) => setErr(code || "room-error"));
 
-    s.on("room:state", (payload) => {
-      if (payload?.data) setData(payload.data);
-      if (payload?.live?.claims) setClaims(payload.live.claims);
-      if (payload?.live?.names) setNames(payload.live.names);
+    return () => s.disconnect();
+  }, [roomId]);
+
+  // Actions
+  const claim = (index, qty = 1) =>
+    window.socket?.emit
+      ? window.socket.emit("room:claim", { index, qty }, () => {})
+      : io(BACKEND_URL).emit("room:claim", { index, qty });
+
+  const unclaim = (index, qty = 1) =>
+    window.socket?.emit
+      ? window.socket.emit("room:unclaim", { index, qty }, () => {})
+      : io(BACKEND_URL).emit("room:unclaim", { index, qty });
+
+  // Compute remaining per line
+  const remainingFor = (idx) => {
+    const row = claims[idx] || {};
+    const sum = Object.values(row).reduce((a, b) => a + (Number(b) || 0), 0);
+    const qty = Number(receipt?.items?.[idx]?.quantity || 0);
+    return Math.max(0, +(qty - sum).toFixed(3));
+  };
+
+  // === Per-user totals ===
+  const perUserTotals = useMemo(() => {
+    if (!receipt) return { base: {}, final: {}, ids: [] };
+
+    // Build base total per user from claims
+    const base = {};
+    (receipt.items || []).forEach((it, idx) => {
+      const unit = Number(it.price) || 0; // unit price
+      const row = claims[idx] || {};
+      for (const [uid, q] of Object.entries(row)) {
+        base[uid] = (base[uid] || 0) + unit * (Number(q) || 0);
+      }
     });
 
-    s.on("room:live", (live) => {
-      if (live?.claims) setClaims(live.claims);
-      if (live?.names) setNames(live.names);
-    });
+    const ids = Array.from(
+      new Set(Object.keys({ ...names, ...base }))
+    );
 
-    s.on("room:presence", (p) => {
-      if (typeof p?.count === "number") setPresence(p.count);
-      if (p?.live?.names) setNames(p.live.names);
-    });
+    const subtotal = Number(receipt.subtotal || 0);
+    const total = Number(
+      receipt.total != null ? receipt.total : subtotal + (Number(receipt.tax) || 0)
+    );
+    const fees = Math.max(0, +(total - subtotal).toFixed(3));
 
-    return () => { s.disconnect(); };
-  }, [roomId, displayName]);
+    const sumBase = Object.values(base).reduce((a, b) => a + b, 0);
+    const final = {};
+    if (sumBase > 0) {
+      ids.forEach((uid) => {
+        const b = base[uid] || 0;
+        const feeShare = fees * (b / sumBase);
+        final[uid] = +(b + feeShare).toFixed(3);
+      });
+    } else {
+      // nobody claimed yet → split fees evenly across present users
+      const n = Math.max(ids.length, 1);
+      const even = +(fees / n).toFixed(3);
+      ids.forEach((uid) => (final[uid] = even));
+    }
+
+    return { base, final, ids };
+  }, [claims, names, receipt]);
 
   if (!roomId) {
     return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>
+      <div style={{ padding: 16 }}>
         <h2>Missing room id</h2>
-        <p>Use a link like <code>#/live/ABC123</code>.</p>
+        <p>Use a link like <code>#/live/ABCDE1</code>.</p>
         <Link to="/">← Back</Link>
       </div>
     );
   }
   if (err) {
     return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif", color:"#b00020" }}>
+      <div style={{ padding: 16, color: "#b00020" }}>
         <h2>Couldn’t load room {roomId}</h2>
         <p>Error: {err}</p>
         <Link to="/">← Back</Link>
       </div>
     );
   }
-  if (!data) return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
+  if (!receipt) return <div style={{ padding: 16 }}>Loading…</div>;
 
-  const items = data.items ?? [];
-  const youId = Object.entries(names).find(([_, n]) => n === displayName)?.[0] ?? null;
-
-  const sumClaims = (idx) => {
-    const row = claims[idx] || {};
-    return Object.values(row).reduce((a, b) => a + (Number(b) || 0), 0);
-  };
-  const remaining = (idx) => Math.max(0, Number(items[idx]?.quantity || 0) - sumClaims(idx));
-  const mineQty = (idx) => {
-    if (!youId) return 0;
-    const row = claims[idx] || {};
-    return Number(row[youId] || 0);
-  };
-
-  const claimOne = (idx) => {
-    socketRef.current?.emit("room:claim", { index: idx, qty: 1 }, (res) => {
-      if (!res?.ok) console.warn("claim failed:", res?.error);
-    });
-  };
-  const unclaimOne = (idx) => {
-    socketRef.current?.emit("room:unclaim", { index: idx, qty: 1 }, (res) => {
-      if (!res?.ok) console.warn("unclaim failed:", res?.error);
-    });
-  };
-
-  const joinUrl = window.location.href;
+  const shareUrl = `${window.location.origin}/#/live/${roomId}`;
 
   return (
-    <div style={{ padding:16, fontFamily:"system-ui,sans-serif", maxWidth: 1000, margin:"0 auto" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
-        <div>
-          <h2 style={{ margin:0 }}>Live room {roomId}</h2>
-          <div style={{ color:"#666", fontSize:13 }}>
-            People online: <b>{presence || "-"}</b>
-          </div>
-        </div>
-        <Link to="/" style={{ fontSize:14 }}>← Back</Link>
+    <div style={{ maxWidth: 1100, margin: "24px auto", padding: 16, fontFamily: "system-ui,sans-serif" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+        <h2 style={{ margin: 0 }}>Room {receipt.id}</h2>
+        <Link to="/" style={{ fontSize: 14 }}>← Back</Link>
       </div>
 
-      <div style={{ marginTop:12, display:"flex", gap:16, flexWrap:"wrap", alignItems:"center" }}>
-        <QRCodeCanvas value={joinUrl} size={140} includeMargin />
-        <div style={{ fontSize:13, wordBreak:"break-all" }}>
-          <div style={{ color:"#555", marginBottom:6 }}>Share this link:</div>
-          <code>{joinUrl}</code>
-          <div style={{ marginTop:8, display:"flex", gap:8 }}>
-            <button
-              onClick={async () => {
-                try { await navigator.clipboard.writeText(joinUrl); alert("Link copied!"); }
-                catch { window.prompt("Copy link:", joinUrl); }
-              }}
-              style={{ padding:"6px 10px", border:"1px solid #ddd", borderRadius:8, cursor:"pointer" }}
-            >
-              Copy link
-            </button>
-          </div>
+      {/* QR / Share */}
+      <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+        <QRCodeCanvas value={shareUrl} size={160} includeMargin />
+        <div style={{ fontSize: 13, wordBreak: "break-all" }}>
+          Share this room:
+          <div><code>{shareUrl}</code></div>
+        </div>
+        <div style={{ marginLeft: "auto", fontSize: 13, color: "#555" }}>
+          People online: <b>{peers}</b>
         </div>
       </div>
 
-      <table style={{ width:"100%", borderCollapse:"collapse", marginTop:16 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign:"left", borderBottom:"1px solid #ddd", padding:8 }}>Item</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Qty</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Price</th>
-            <th style={{ textAlign:"left",  borderBottom:"1px solid #ddd", padding:8 }}>Claims</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it, idx) => {
-            const row = claims[idx] || {};
-            const left = remaining(idx);
-            const my = mineQty(idx);
-            const canTake = left > 0;
-            const canDrop = my > 0;
+      {/* Summary */}
+      <div style={{ marginTop: 10, color: "#666" }}>
+        Subtotal: <b>{receipt.subtotal.toFixed(3)}</b> &nbsp;•&nbsp;
+        Tax/Fees: <b>{(+((receipt.total ?? 0) - (receipt.subtotal ?? 0))).toFixed(3)}</b> &nbsp;•&nbsp;
+        Total: <b>{Number(receipt.total ?? receipt.subtotal).toFixed(3)}</b>
+      </div>
 
-            return (
-              <tr key={idx}>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>{it.name}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  {Number(it.quantity ?? 1).toFixed(3)}
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  {Number(it.price ?? 0).toFixed(3)}
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>
-                  <div style={{ fontSize:13 }}>
-                    {Object.entries(row).length === 0 && <span style={{ color:"#777" }}>—</span>}
-                    {Object.entries(row).map(([uid, q]) => (
-                      <div key={uid}><b>{names[uid] || uid}</b>: {Number(q).toFixed(3)}</div>
-                    ))}
-                    <div style={{ marginTop:4, color: left === 0 ? "#2e7d32" : "#b06a00" }}>
-                      Remaining: <b>{left.toFixed(3)}</b>
+      {/* Items */}
+      <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Items</h3>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Item</th>
+              <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Qty</th>
+              <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Unit</th>
+              <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Line Total</th>
+              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Who / Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipt.items.map((it, idx) => {
+              const row = claims[idx] || {};
+              const my = Number(row[socketId] || 0);
+              const remaining = remainingFor(idx);
+              return (
+                <tr key={idx}>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>{it.name}</td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                    {Number(it.quantity).toFixed(3)}
+                  </td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                    {Number(it.price).toFixed(3)}
+                  </td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1", textAlign: "right" }}>
+                    {(Number(it.price) * Number(it.quantity)).toFixed(3)}
+                  </td>
+                  <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        disabled={remaining <= 0}
+                        onClick={() => claim(idx, 1)}
+                        style={{ padding: "4px 8px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+                        title={remaining > 0 ? "Take 1 unit" : "No units remaining"}
+                      >
+                        +1
+                      </button>
+                      <button
+                        disabled={my <= 0}
+                        onClick={() => unclaim(idx, 1)}
+                        style={{ padding: "4px 8px", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer" }}
+                        title={my > 0 ? "Release 1 unit" : "You have none"}
+                      >
+                        −1
+                      </button>
+                      <span style={{ fontSize: 12, color: remaining === 0 ? "#b00020" : "#555" }}>
+                        Remaining: <b>{remaining.toFixed(3)}</b> &nbsp;•&nbsp; You: <b>{my.toFixed(3)}</b>
+                      </span>
                     </div>
-                  </div>
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  <div style={{ display:"inline-flex", gap:8 }}>
-                    <button
-                      onClick={() => claimOne(idx)}
-                      disabled={!canTake}
-                      title={canTake ? "Claim 1 unit" : "No units left"}
-                      style={{
-                        padding:"6px 10px",
-                        border:"1px solid #ddd",
-                        borderRadius:8,
-                        cursor: canTake ? "pointer" : "not-allowed",
-                        background: canTake ? "#111" : "#eee",
-                        color: canTake ? "#fff" : "#999",
-                      }}
-                    >Take 1</button>
-                    <button
-                      onClick={() => unclaimOne(idx)}
-                      disabled={!canDrop}
-                      title={canDrop ? "Release 1 unit" : "You have none"}
-                      style={{
-                        padding:"6px 10px",
-                        border:"1px solid #ddd",
-                        borderRadius:8,
-                        cursor: canDrop ? "pointer" : "not-allowed",
-                        background: "white",
-                      }}
-                    >Put back</button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+
+                    {/* Who has what */}
+                    <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+                      {Object.entries(row).length === 0 ? (
+                        <span style={{ color: "#777" }}>— nobody yet</span>
+                      ) : (
+                        Object.entries(row).map(([uid, q]) => (
+                          <span key={uid} style={{ border: "1px solid #eee", borderRadius: 6, padding: "2px 6px" }}>
+                            {names[uid] || uid.slice(0, 6)}: {Number(q).toFixed(3)}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Per-person totals (fees included) */}
+      <div style={{ marginTop: 16, border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+        <h3 style={{ marginTop: 0 }}>Totals per person</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", maxWidth: 520, gap: 8 }}>
+          {perUserTotals.ids.map((uid) => (
+            <div key={uid} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px dashed #eee", padding: "6px 8px" }}>
+              <span>{names[uid] || uid.slice(0, 6)}</span>
+              <b>{(perUserTotals.final[uid] || 0).toFixed(3)}</b>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
