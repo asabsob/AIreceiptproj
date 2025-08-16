@@ -13,9 +13,9 @@ export default function Room() {
   const roomId = id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
 
   const [err, setErr] = useState("");
-  const [data, setData] = useState(null);       // { items, subtotal?, tax?, total? }
-  const [claims, setClaims] = useState([]);     // Array<{ [userId]: number }>
-  const [names, setNames]   = useState({});     // { [userId]: string }
+  const [data, setData] = useState(null);         // { items, subtotal?, tax?, total? }
+  const [claims, setClaims] = useState([]);       // Array<{ [userId]: number }>
+  const [names, setNames]   = useState({});       // { [userId]: string }
   const [presence, setPresence] = useState(0);
   const [youId, setYouId] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -31,21 +31,21 @@ export default function Room() {
     return n;
   });
 
-  /* ------------------------ helpers (no hooks) ------------------------ */
+  /* ------------------------ helpers ------------------------ */
   const normClaims = (c) =>
     Array.isArray(c) ? c.map((row) => (row && typeof row === "object" && !Array.isArray(row) ? row : {})) : [];
 
   const safeEntries = (row) =>
     row && typeof row === "object" && !Array.isArray(row) ? Object.entries(row) : [];
 
-  // Treat price as line total; divide by quantity for unit
+  // Treat `price` as line total; divide by quantity for unit
   const getUnit = (it) => {
     const qty = Math.max(0, Number(it?.quantity ?? 1));
     const line = Number(it?.price ?? 0);
     return qty > 0 ? line / qty : 0;
   };
 
-  /* -------------------- initial fetch (static data) ------------------- */
+  /* -------------------- fetch static data ------------------- */
   useEffect(() => {
     if (!roomId) return;
     setErr("");
@@ -55,12 +55,12 @@ export default function Room() {
       .catch((e) => setErr(e.message));
   }, [roomId]);
 
-  /* -------------------------- socket wiring --------------------------- */
+  /* --------------------- socket wiring ---------------------- */
   useEffect(() => {
     if (!roomId) return;
     const s = io(API_BASE, {
       withCredentials: false,
-      transports: ["websocket", "polling"], // ws first, then fallback
+      transports: ["websocket", "polling"],
     });
     socketRef.current = s;
 
@@ -90,8 +90,7 @@ export default function Room() {
     return () => s.disconnect();
   }, [roomId, displayName]);
 
-  /* ----------------- derive values (hooks ALWAYS run) ----------------- */
-  // Make these safe when data is null so hooks run every render
+  /* ----------------- derived values (safe) ------------------ */
   const items = Array.isArray(data?.items) ? data.items : [];
   const subtotalPrinted = Number.isFinite(+data?.subtotal) ? Number(data.subtotal) : null;
   const totalPrinted    = Number.isFinite(+data?.total)    ? Number(data.total)    : null;
@@ -115,7 +114,7 @@ export default function Room() {
 
   const perUserTotals = useMemo(() => {
     try {
-      const userBase = {}; // userId -> base sum
+      const userBase = {}; // userId -> sum of (unit * claimedQty)
       let baseSum = 0;
 
       items.forEach((it, idx) => {
@@ -155,32 +154,32 @@ export default function Room() {
 
   const yourTotal = youId && Number.isFinite(+perUserTotals[youId]) ? perUserTotals[youId] : 0;
 
-  /* --------------------------- early UI returns ------------------------ */
+  /* --------------------------- UI guards -------------------- */
   if (!roomId) {
     return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>
-        <h2>Missing room id</h2>
-        <p>Use a link like <code>#/live/ABC123</code>.</p>
-        <Link to="/">← Back</Link>
+      <div className="container">
+        <div className="card error">
+          <h3>Missing room id</h3>
+          <p>Use a link like <code>#/live/ABC123</code>.</p>
+          <Link to="/" className="btn">← Back</Link>
+        </div>
       </div>
     );
   }
   if (err) {
     return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif", color:"#b00020" }}>
-        <h2>Couldn’t load room {roomId}</h2>
-        <p>Error: {err}</p>
-        <Link to="/">← Back</Link>
+      <div className="container">
+        <div className="card error">
+          <h3>Couldn’t load room {roomId}</h3>
+          <p>{err}</p>
+          <Link to="/" className="btn">← Back</Link>
+        </div>
       </div>
     );
   }
-  if (!data) {
-    return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
-  }
+  if (!data) return <div className="container"><div className="muted">Loading…</div></div>;
 
-  /* ------------------------------- render ------------------------------ */
-  const joinUrl = window.location.href;
-
+  /* -------------------------- actions ----------------------- */
   const claimOne = (idx) => {
     if (!connected) return;
     socketRef.current?.emit("room:claim", { index: idx, qty: 1 }, (res) => {
@@ -194,146 +193,175 @@ export default function Room() {
     });
   };
 
+  const joinUrl = window.location.href;
+
   return (
-    <div style={{ padding:16, fontFamily:"system-ui,sans-serif", maxWidth: 1100, margin:"0 auto" }}>
-      {/* header */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
-        <div>
-          <h2 style={{ margin:0 }}>Live room {roomId}</h2>
-          <div style={{ color:"#666", fontSize:13 }}>
-            People online: <b>{presence || "-"}</b> • You are <b>{displayName}</b> • Socket:{" "}
-            <b style={{ color: connected ? "#2e7d32" : "#b00020" }}>{connected ? "connected" : "connecting…"}</b>
+    <div className="container">
+      {/* Top header */}
+      <header className="page-head row between">
+        <div className="stack-2">
+          <h1 className="title">Live room {roomId}</h1>
+          <div className="muted small row gap-2 wrap">
+            <span>People online: <b>{presence || "-"}</b></span>
+            <span>• You are <b>{displayName}</b></span>
+            <span className={`chip ${connected ? "chip-ok" : "chip-warn"}`}>
+              {connected ? "Socket connected" : "Connecting…"}
+            </span>
           </div>
         </div>
-        <Link to="/" style={{ fontSize:14 }}>← Back</Link>
-      </div>
+        <Link to="/" className="btn btn-ghost">← Back</Link>
+      </header>
 
-      {/* share */}
-      <div style={{ marginTop:12, display:"flex", gap:16, flexWrap:"wrap", alignItems:"center" }}>
-        <QRCodeCanvas value={joinUrl} size={140} includeMargin />
-        <div style={{ fontSize:13, wordBreak:"break-all" }}>
-          <div style={{ color:"#555", marginBottom:6 }}>Share this link:</div>
-          <code>{joinUrl}</code>
-          <div style={{ marginTop:8, display:"flex", gap:8 }}>
+      {/* Share card */}
+      <section className="card row gap-4 wrap align-center">
+        <div className="qr">
+          <QRCodeCanvas value={joinUrl} size={140} includeMargin />
+        </div>
+        <div className="stack-2">
+          <div className="muted small">Share this link</div>
+          <code className="code-block">{joinUrl}</code>
+          <div className="row gap-2">
             <button
+              className="btn btn-primary"
               onClick={async () => {
-                try { await navigator.clipboard.writeText(joinUrl); alert("Link copied!"); }
+                try { await navigator.clipboard.writeText(joinUrl); }
                 catch { window.prompt("Copy link:", joinUrl); }
               }}
-              style={{ padding:"6px 10px", border:"1px solid #ddd", borderRadius:8, cursor:"pointer" }}
             >
               Copy link
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* items */}
-      <table style={{ width:"100%", borderCollapse:"collapse", marginTop:16 }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign:"left",  borderBottom:"1px solid #ddd", padding:8 }}>Item</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Qty</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Unit</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Line total</th>
-            <th style={{ textAlign:"left",  borderBottom:"1px solid #ddd", padding:8 }}>Claims</th>
-            <th style={{ textAlign:"right", borderBottom:"1px solid #ddd", padding:8 }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((it, idx) => {
-            const unit = getUnit(it);
-            const qty  = Number(it.quantity ?? 1);
-            const row  = claims[idx] || {};
-            const left = remaining(idx);
-            const my   = mineQty(idx);
-
-            const single = qty <= 1;
-            const lockedByOther = takenByOtherSingle(idx);
-
-            const canTake = connected && (single ? (!lockedByOther && left > 0) : left > 0);
-            const canDrop = connected && my > 0;
-
-            return (
-              <tr key={idx}>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>{it.name}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{qty.toFixed(3)}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{unit.toFixed(3)}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>{(unit * qty).toFixed(3)}</td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1" }}>
-                  <div style={{ fontSize:13 }}>
-                    {safeEntries(row).length === 0 && <span style={{ color:"#777" }}>—</span>}
-                    {safeEntries(row).map(([uid, q]) => (
-                      <div key={uid}><b>{names[uid] || uid}</b>: {Number(q).toFixed(3)}</div>
-                    ))}
-                    <div style={{ marginTop:4, color: left === 0 ? "#2e7d32" : "#b06a00" }}>
-                      Remaining: <b>{left.toFixed(3)}</b>
-                    </div>
-                  </div>
-                </td>
-                <td style={{ padding:8, borderBottom:"1px solid #f1f1f1", textAlign:"right" }}>
-                  <div style={{ display:"inline-flex", gap:8 }}>
-                    <button
-                      onClick={() => claimOne(idx)}
-                      disabled={!canTake}
-                      title={
-                        connected
-                          ? (single ? "Claim this item" : "Claim 1 unit")
-                          : "Connecting…"
-                      }
-                      style={{
-                        padding:"6px 10px",
-                        border:"1px solid #ddd",
-                        borderRadius:8,
-                        cursor: canTake ? "pointer" : "not-allowed",
-                        background: canTake ? "#111" : "#eee",
-                        color: canTake ? "#fff" : "#999",
-                      }}
-                    >
-                      {single ? "Claim" : "+1"}
-                    </button>
-                    <button
-                      onClick={() => unclaimOne(idx)}
-                      disabled={!canDrop}
-                      title={connected ? (single ? "Release" : "Return 1 unit") : "Connecting…"}
-                      style={{
-                        padding:"6px 10px",
-                        border:"1px solid #ddd",
-                        borderRadius:8,
-                        cursor: canDrop ? "pointer" : "not-allowed",
-                        background: "white",
-                      }}
-                    >
-                      {single ? "Release" : "−1"}
-                    </button>
-                  </div>
-                </td>
+      {/* Items table */}
+      <section className="card">
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="left">Item</th>
+                <th className="right">Qty</th>
+                <th className="right">Unit</th>
+                <th className="right">Line total</th>
+                <th className="left">Claims</th>
+                <th className="right">Actions</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {items.map((it, idx) => {
+                const unit = getUnit(it);
+                const qty  = Number(it.quantity ?? 1);
+                const row  = claims[idx] || {};
+                const left = remaining(idx);
+                const my   = mineQty(idx);
 
-      {/* totals */}
-      <div style={{ marginTop:16, border:"1px solid #eee", borderRadius:12, padding:12, maxWidth:520 }}>
-        <h3 style={{ marginTop:0 }}>Totals (incl. pro-rated fees/tax)</h3>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-          {Object.keys(perUserTotals).length === 0 && (
-            <div style={{ color:"#777" }}>No selections yet.</div>
-          )}
-          {Object.entries(perUserTotals).map(([uid, amt]) => (
-            <div key={uid} style={{ display:"flex", justifyContent:"space-between" }}>
-              <span>{names[uid] || uid}{uid === youId ? " (you)" : ""}</span>
-              <b>{(Number(amt)||0).toFixed(3)}</b>
-            </div>
-          ))}
+                const single = qty <= 1;
+                const lockedByOther = takenByOtherSingle(idx);
+
+                const canTake = connected && (single ? (!lockedByOther && left > 0) : left > 0);
+                const canDrop = connected && my > 0;
+
+                return (
+                  <tr key={idx}>
+                    <td className="left">{it.name}</td>
+                    <td className="right">{qty.toFixed(3)}</td>
+                    <td className="right">{unit.toFixed(3)}</td>
+                    <td className="right">{(unit * qty).toFixed(3)}</td>
+                    <td className="left">
+                      <div className="stack-1 small">
+                        {safeEntries(row).length === 0 && <span className="muted">—</span>}
+                        {safeEntries(row).map(([uid, q]) => (
+                          <div key={uid} className="row gap-2 align-center">
+                            <Avatar name={names[uid] || uid} />
+                            <span><b>{names[uid] || uid}</b>: {Number(q).toFixed(3)}</span>
+                          </div>
+                        ))}
+                        <div className={`chip ${left === 0 ? "chip-ok" : "chip-warn"}`}>
+                          Remaining: {left.toFixed(3)}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="right">
+                      <div className="row gap-2 justify-end">
+                        <button
+                          className={`btn btn-dark ${!canTake ? "btn-disabled" : ""}`}
+                          onClick={() => claimOne(idx)}
+                          disabled={!canTake}
+                          title={connected ? (single ? "Claim this item" : "Claim 1 unit") : "Connecting…"}
+                        >
+                          {single ? "Claim" : "+1"}
+                        </button>
+                        <button
+                          className={`btn ${!canDrop ? "btn-disabled" : ""}`}
+                          onClick={() => unclaimOne(idx)}
+                          disabled={!canDrop}
+                          title={connected ? (single ? "Release" : "Return 1 unit") : "Connecting…"}
+                        >
+                          {single ? "Release" : "−1"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-        {youId && (
-          <div style={{ marginTop:8, fontSize:13, color:"#333" }}>
-            Your current total: <b>{(Number(yourTotal)||0).toFixed(3)}</b>
+      </section>
+
+      {/* Totals card */}
+      <section className="card stack-2 max-520">
+        <h3 className="subtitle">Totals (incl. pro-rated fees/tax)</h3>
+        {Object.keys(perUserTotals).length === 0 ? (
+          <div className="muted">No selections yet.</div>
+        ) : (
+          <div className="list">
+            {Object.entries(perUserTotals).map(([uid, amt]) => (
+              <div key={uid} className="row between align-center">
+                <div className="row gap-2 align-center">
+                  <Avatar name={names[uid] || uid} />
+                  <span>
+                    {names[uid] || uid}{uid === youId ? " (you)" : ""}
+                  </span>
+                </div>
+                <b>{(Number(amt) || 0).toFixed(3)}</b>
+              </div>
+            ))}
           </div>
         )}
-      </div>
+        {youId && (
+          <div className="muted small">
+            Your current total: <b>{(Number(yourTotal) || 0).toFixed(3)}</b>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* --------- tiny inline component using your CSS tokens --------- */
+function Avatar({ name }) {
+  const initials = (name || "?")
+    .split(" ")
+    .map((s) => s[0]?.toUpperCase())
+    .slice(0, 2)
+    .join("");
+
+  // stable hue from name
+  let hash = 0; for (let i = 0; i < (name || "").length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  const hue = Math.abs(hash) % 360;
+
+  return (
+    <div
+      className="avatar"
+      style={{
+        background: `hsl(${hue} 90% 90%)`,
+        color: `hsl(${hue} 70% 30%)`
+      }}
+      title={name}
+    >
+      {initials || "?"}
     </div>
   );
 }
