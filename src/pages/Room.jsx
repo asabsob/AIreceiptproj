@@ -17,11 +17,12 @@ export default function Room() {
   const [claims, setClaims] = useState([]);     // Array<{ [userId]: number }>
   const [names, setNames]   = useState({});     // { [userId]: string }
   const [presence, setPresence] = useState(0);
-
   const [youId, setYouId] = useState(null);
   const [connected, setConnected] = useState(false);
+
   const socketRef = useRef(null);
 
+  // sticky display name
   const [displayName] = useState(() => {
     const saved = localStorage.getItem("displayName");
     if (saved) return saved;
@@ -30,21 +31,21 @@ export default function Room() {
     return n;
   });
 
-  // ---- helpers ----
+  /* ------------------------ helpers (no hooks) ------------------------ */
   const normClaims = (c) =>
     Array.isArray(c) ? c.map((row) => (row && typeof row === "object" && !Array.isArray(row) ? row : {})) : [];
 
   const safeEntries = (row) =>
     row && typeof row === "object" && !Array.isArray(row) ? Object.entries(row) : [];
 
-  // Treat price as **line total**; divide by quantity to get **unit**
+  // Treat price as line total; divide by quantity for unit
   const getUnit = (it) => {
     const qty = Math.max(0, Number(it?.quantity ?? 1));
     const line = Number(it?.price ?? 0);
     return qty > 0 ? line / qty : 0;
   };
 
-  // ---- initial fetch ----
+  /* -------------------- initial fetch (static data) ------------------- */
   useEffect(() => {
     if (!roomId) return;
     setErr("");
@@ -54,40 +55,33 @@ export default function Room() {
       .catch((e) => setErr(e.message));
   }, [roomId]);
 
-  // ---- sockets ----
+  /* -------------------------- socket wiring --------------------------- */
   useEffect(() => {
     if (!roomId) return;
     const s = io(API_BASE, {
       withCredentials: false,
-      transports: ["websocket", "polling"], // try ws, fall back to polling
-      // path: "/socket.io", // use default unless you changed it server-side
+      transports: ["websocket", "polling"], // ws first, then fallback
     });
     socketRef.current = s;
 
-    const onConnect = () => {
+    s.on("connect", () => {
       setConnected(true);
       setYouId(s.id);
       s.emit("join", { roomId, name: displayName });
-    };
-    const onDisconnect = () => setConnected(false);
-
-    s.on("connect", onConnect);
-    s.on("disconnect", onDisconnect);
-    s.on("connect_error", (e) => console.error("socket connect_error:", e?.message || e));
+    });
+    s.on("disconnect", () => setConnected(false));
+    s.on("connect_error", (e) => console.warn("socket connect_error:", e?.message || e));
 
     s.on("room:error", ({ code }) => setErr(code || "room-error"));
-
     s.on("room:state", (payload) => {
       if (payload?.data) setData(payload.data);
       if (payload?.live?.claims) setClaims(normClaims(payload.live.claims));
       if (payload?.live?.names) setNames(payload.live.names);
     });
-
     s.on("room:live", (live) => {
       if (live?.claims) setClaims(normClaims(live.claims));
       if (live?.names) setNames(live.names);
     });
-
     s.on("room:presence", (p) => {
       if (typeof p?.count === "number") setPresence(p.count);
       if (p?.live?.names) setNames(p.live.names);
@@ -96,53 +90,22 @@ export default function Room() {
     return () => s.disconnect();
   }, [roomId, displayName]);
 
-  // ---- guards ----
-  if (!roomId) {
-    return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>
-        <h2>Missing room id</h2>
-        <p>Use a link like <code>#/live/ABC123</code>.</p>
-        <Link to="/">← Back</Link>
-      </div>
-    );
-  }
-  if (err) {
-    return (
-      <div style={{ padding:16, fontFamily:"system-ui,sans-serif", color:"#b00020" }}>
-        <h2>Couldn’t load room {roomId}</h2>
-        <p>Error: {err}</p>
-        <Link to="/">← Back</Link>
-      </div>
-    );
-  }
-  if (!data) return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
+  /* ----------------- derive values (hooks ALWAYS run) ----------------- */
+  // Make these safe when data is null so hooks run every render
+  const items = Array.isArray(data?.items) ? data.items : [];
+  const subtotalPrinted = Number.isFinite(+data?.subtotal) ? Number(data.subtotal) : null;
+  const totalPrinted    = Number.isFinite(+data?.total)    ? Number(data.total)    : null;
 
-  const items = Array.isArray(data.items) ? data.items : [];
-  const subtotalPrinted = Number.isFinite(+data.subtotal) ? Number(data.subtotal) : null;
-  const totalPrinted    = Number.isFinite(+data.total)    ? Number(data.total)    : null;
-
-  // ---- claim math ----
   const sumClaims = (idx) => safeEntries(claims[idx] || {}).reduce((a, [, q]) => a + (Number(q) || 0), 0);
+  const remaining = (idx) => Math.max(0, Number(items[idx]?.quantity ?? 1) - sumClaims(idx));
+  const mineQty   = (idx) => (youId ? Number((claims[idx] || {})[youId] || 0) : 0);
 
-  const remaining = (idx) => {
-    const qty = Number(items[idx]?.quantity ?? 1);
-    return Math.max(0, qty - sumClaims(idx));
-  };
-
-  const mineQty = (idx) => {
-    if (!youId) return 0;
-    const row = claims[idx] || {};
-    return Number(row[youId] || 0);
-  };
-
-  // For qty === 1 lines, lock for others once someone has it
   const takenByOtherSingle = (idx) => {
     const qty = Number(items[idx]?.quantity ?? 1);
     if (qty > 1) return false;
-    const row = claims[idx] || {};
-    const ent = safeEntries(row);
+    const ent = safeEntries(claims[idx] || {});
     if (ent.length === 0) return false;
-    if (!youId) return true; // until we know who we are, be conservative
+    if (!youId) return true;
     if (ent.length === 1) {
       const [uid, q] = ent[0];
       return uid !== youId && (Number(q) || 0) > 0;
@@ -150,20 +113,6 @@ export default function Room() {
     return true;
   };
 
-  const claimOne = (idx) => {
-    if (!connected) return;
-    socketRef.current?.emit("room:claim", { index: idx, qty: 1 }, (res) => {
-      if (!res?.ok) console.warn("claim failed:", res?.error);
-    });
-  };
-  const unclaimOne = (idx) => {
-    if (!connected) return;
-    socketRef.current?.emit("room:unclaim", { index: idx, qty: 1 }, (res) => {
-      if (!res?.ok) console.warn("unclaim failed:", res?.error);
-    });
-  };
-
-  // ---- per-user totals (with fee/tax proration), hardened against crashes ----
   const perUserTotals = useMemo(() => {
     try {
       const userBase = {}; // userId -> base sum
@@ -171,8 +120,7 @@ export default function Room() {
 
       items.forEach((it, idx) => {
         const unit = getUnit(it);
-        const row = claims[idx] || {};
-        safeEntries(row).forEach(([uid, q]) => {
+        safeEntries(claims[idx] || {}).forEach(([uid, q]) => {
           const qty = Number(q) || 0;
           userBase[uid] = (userBase[uid] || 0) + unit * qty;
           baseSum += unit * qty;
@@ -207,7 +155,44 @@ export default function Room() {
 
   const yourTotal = youId && Number.isFinite(+perUserTotals[youId]) ? perUserTotals[youId] : 0;
 
+  /* --------------------------- early UI returns ------------------------ */
+  if (!roomId) {
+    return (
+      <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>
+        <h2>Missing room id</h2>
+        <p>Use a link like <code>#/live/ABC123</code>.</p>
+        <Link to="/">← Back</Link>
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div style={{ padding:16, fontFamily:"system-ui,sans-serif", color:"#b00020" }}>
+        <h2>Couldn’t load room {roomId}</h2>
+        <p>Error: {err}</p>
+        <Link to="/">← Back</Link>
+      </div>
+    );
+  }
+  if (!data) {
+    return <div style={{ padding:16, fontFamily:"system-ui,sans-serif" }}>Loading…</div>;
+  }
+
+  /* ------------------------------- render ------------------------------ */
   const joinUrl = window.location.href;
+
+  const claimOne = (idx) => {
+    if (!connected) return;
+    socketRef.current?.emit("room:claim", { index: idx, qty: 1 }, (res) => {
+      if (!res?.ok) console.warn("claim failed:", res?.error);
+    });
+  };
+  const unclaimOne = (idx) => {
+    if (!connected) return;
+    socketRef.current?.emit("room:unclaim", { index: idx, qty: 1 }, (res) => {
+      if (!res?.ok) console.warn("unclaim failed:", res?.error);
+    });
+  };
 
   return (
     <div style={{ padding:16, fontFamily:"system-ui,sans-serif", maxWidth: 1100, margin:"0 auto" }}>
