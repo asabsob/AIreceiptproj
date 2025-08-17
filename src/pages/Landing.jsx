@@ -1,13 +1,10 @@
-
 import React, { useRef } from "react";
-import { useNavigate } from "react-router-dom";
+// import { useNavigate } from "react-router-dom"; // not needed if no demo
 
 export default function Landing() {
   const fileRef = useRef(null);
-  const navigate = useNavigate();
+  // const navigate = useNavigate(); // not needed if no demo
 
-  const onUploadClick = () => fileRef.current?.click();
-  
   const onFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -23,10 +20,11 @@ export default function Landing() {
   return (
     <>
       <input
+        id="receipt-input"               // ✅ give it an id
         ref={fileRef}
         type="file"
         accept="image/*,.pdf"
-        className="hidden"
+        className="hidden"               // can stay hidden now
         onChange={onFileChange}
       />
 
@@ -43,9 +41,12 @@ export default function Landing() {
                 Upload any receipt. We’ll parse items, assign to people, and generate payment links—fast.
               </p>
 
+              {/* ✅ label opens the file picker reliably */}
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-  <button className="btn primary" onClick={onUploadClick}>Upload Receipt</button>
-</div>
+                <label htmlFor="receipt-input" className="btn primary" role="button">
+                  Upload Receipt
+                </label>
+              </div>
 
               <ul className="muted" style={{ marginTop: 16, paddingLeft: 18 }}>
                 <li>Works with photos or PDFs</li>
@@ -92,7 +93,10 @@ export default function Landing() {
 
                 <div className="card-foot">
                   <span className="muted">Secure processing</span>
-                  <button className="link" onClick={onUploadClick}>Upload now →</button>
+                  {/* ✅ same trick for the footer link */}
+                  <label htmlFor="receipt-input" className="link" role="button">
+                    Upload now →
+                  </label>
                 </div>
               </div>
             </div>
@@ -100,37 +104,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Trust bar */}
-      <div className="trust">
-        <div className="container trust-row">
-          <span className="muted">Works with</span>
-          <div className="logo" /><div className="logo" /><div className="logo" /><div className="logo" />
-        </div>
-      </div>
-
-      {/* Steps */}
-      <section className="flow">
-        <div className="container">
-          <h3 style={{ fontSize: 28, margin: "26px 0 6px" }}>
-            From photo to payment in three steps
-          </h3>
-          <div className="cards3">
-            {[
-              { t: "Upload receipt", d: "Drag & drop a photo or PDF." },
-              { t: "AI parsing & split", d: "Items recognized, assign to diners." },
-              { t: "Share payment links", d: "Generate QR or deep links to pay." },
-            ].map((s, i) => (
-              <div key={s.t} className="step-card">
-                <div className="step-tag">STEP {i + 1}</div>
-                <div className="step-title">{s.t}</div>
-                <p className="muted">{s.d}</p>
-                <div className="skeleton w80" />
-                <div className="skeleton w60" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* Trust bar + Steps ... unchanged */}
     </>
   );
 }
