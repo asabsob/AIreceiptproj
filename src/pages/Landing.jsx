@@ -1,109 +1,137 @@
-// src/lib/extractRoomId.js
+// src/pages/Landing.jsx
+import React, { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { uploadReceipt } from "../lib/api";
+import { extractRoomId } from "../lib/extractRoomId";
 
-// Heuristics for extracting an id from arbitrary JSON, headers, or raw text.
-export function extractRoomId(responseLike) {
-  if (!responseLike) return undefined;
+export function Landing() {
+  const fileRef = useRef(null);
+  const navigate = useNavigate();
+  const [isUploading, setIsUploading] = useState(false);
 
-  const data = responseLike.data ?? responseLike;
-  const rawText = responseLike.rawText || "";
-  const getHeader =
-    responseLike?.headers?.get
-      ? (k) => responseLike.headers.get(k)
-      : (k) => responseLike?.headers?.[k];
+  const onFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  // 1) Try common containers in order (without mixing ?? and ||)
-  const direct =
-    pickId(data) ||
-    pickId(data?.data) ||
-    pickId(data?.result) ||
-    pickId(data?.payload) ||
-    pickId(data?.room) ||
-    (Array.isArray(data) ? pickId(data[0]) : undefined);
-  if (direct) return direct;
+    try {
+      setIsUploading(true);
+      const res = await uploadReceipt(file);
 
-  // 2) Deep scan anywhere in the object
-  const deep = deepFindId(data);
-  if (deep) return deep;
+      console.groupCollapsed("[parse] backend response");
+      console.log("headers:", res.headers ? Object.fromEntries(res.headers.entries()) : {});
+      console.log("data:", res.data);
+      if (res.rawText) console.log("rawText:", res.rawText);
+      console.groupEnd();
 
-  // 3) Location header like /room/abc123
-  const loc = getHeader("location") || getHeader("Location");
-  const fromLoc = extractFromUrlish(loc);
-  if (fromLoc) return fromLoc;
-
-  // 4) Raw text fallbacks
-  const fromTextUrl = extractFromUrlish(rawText);
-  if (fromTextUrl) return fromTextUrl;
-
-  const fromAssign = matchIdAssignment(rawText);
-  if (fromAssign) return fromAssign;
-
-  return undefined;
-}
-
-// ---- helpers ----
-
-function pickId(o) {
-  if (!o || typeof o !== "object") return undefined;
-  const candidates = [
-    "roomId", "room_id",
-    "id", "_id",
-    "sessionId", "session_id",
-    "receiptId", "receipt_id",
-    "room",
-    "slug",
-  ];
-  for (const k of candidates) {
-    const id = normalizeId(o[k], k);
-    if (id) return id;
-  }
-  return undefined;
-}
-
-function deepFindId(o, seen = new Set()) {
-  if (!o || typeof o !== "object" || seen.has(o)) return undefined;
-  seen.add(o);
-
-  for (const [k, v] of Object.entries(o)) {
-    const id = normalizeId(v, k);
-    if (id) return id;
-  }
-  for (const v of Object.values(o)) {
-    if (typeof v === "object") {
-      const found = deepFindId(v, seen);
-      if (found) return found;
+      const roomId = extractRoomId(res);
+      if (roomId) {
+        navigate(`/room/${encodeURIComponent(String(roomId).trim())}`);
+      } else {
+        alert("Parsed successfully, but no room id returned. Please check the backend response shape.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert(
+        `Upload failed: ${err.message}\n\nTips:\n• Ensure CORS is enabled on the backend\n• Endpoint should be POST ${
+          import.meta.env.VITE_BACKEND_URL ||
+          "https://aireceiptsplit-backend-production.up.railway.app"
+        }/parse\n• Field name should be "file" (or adjust it in api.js)`
+      );
+    } finally {
+      setIsUploading(false);
+      e.target.value = ""; // allow re-selecting same file
     }
-  }
-  return undefined;
-}
+  };
 
-function normalizeId(value, keyHint = "") {
-  if (value == null) return undefined;
+  return (
+    <>
+      <input
+        id="receipt-input"
+        ref={fileRef}
+        type="file"
+        accept="image/*,.pdf"
+        className="hidden"
+        onChange={onFileChange}
+      />
 
-  if (typeof value === "string") {
-    const fromUrl = extractFromUrlish(value);
-    if (fromUrl) return fromUrl;
-    if (/^[A-Za-z0-9_-]{4,}$/.test(value.trim())) return value.trim();
-  }
-  if (typeof value === "number") return String(value);
+      <section className="hero" style={{ borderBottom: "1px solid #e5e7eb" }}>
+        <div className="container" style={{ padding: "32px 0" }}>
+          <div style={{ display: "grid", gap: 24, gridTemplateColumns: "1fr", alignItems: "center" }}>
+            <div style={{ maxWidth: 680 }}>
+              <span className="pill">New • AI-powered splitting</span>
+              <h2 style={{ margin: "8px 0 0", fontSize: 42, lineHeight: 1.1 }}>
+                Split Receipts <span style={{ color: "#2563eb" }}>Smarter</span> with AI
+              </h2>
+              <p className="muted" style={{ marginTop: 10 }}>
+                Upload any receipt. We’ll parse items, assign to people, and generate payment links—fast.
+              </p>
 
-  if (keyHint && /(^|_)(room)?id$/i.test(keyHint)) {
-    if (typeof value === "string" || typeof value === "number") {
-      return String(value);
-    }
-  }
-  return undefined;
-}
+              <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+                <label
+                  htmlFor="receipt-input"
+                  className="btn primary"
+                  role="button"
+                  style={{ pointerEvents: isUploading ? "none" : "auto", opacity: isUploading ? 0.7 : 1 }}
+                >
+                  {isUploading ? "Uploading…" : "Upload Receipt"}
+                </label>
+              </div>
 
-function extractFromUrlish(s) {
-  if (typeof s !== "string") return undefined;
-  const m = s.match(/\/room\/([A-Za-z0-9_-]{4,})/);
-  return m ? m[1] : undefined;
-}
+              <ul className="muted" style={{ marginTop: 16, paddingLeft: 18 }}>
+                <li>Works with photos or PDFs</li>
+                <li>No POS integration required</li>
+                <li>Shareable QR payment links</li>
+              </ul>
+            </div>
 
-function matchIdAssignment(text) {
-  if (typeof text !== "string" || !text) return undefined;
-  const m = text.match(
-    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{4,})["']?/
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "100%", maxWidth: 420, background: "#fff",
+                  border: "1px solid #e5e7eb", borderRadius: 14,
+                  boxShadow: "0 8px 24px rgba(16,24,40,.06)", padding: 14
+                }}
+              >
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".12em", color: "#6b7280" }}>
+                  RECEIPT
+                </div>
+                <div className="skeleton w85" />
+                <div className="skeleton w70" />
+                <div className="skeleton w80" />
+                <div className="skeleton w60" />
+
+                <div className="grid-3">
+                  <div className="panel">
+                    <div className="panel-title">Parsed Items</div>
+                    <div className="skeleton w90" />
+                    <div className="skeleton w70" />
+                    <div className="skeleton w80" />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Assign to Diners</div>
+                    {["Sameer", "Omar", "Ahmad", "Faisal"].map((n) => (
+                      <span key={n} className="chip">{n}</span>
+                    ))}
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Pay</div>
+                    <div className="qr" aria-label="QR mock" />
+                  </div>
+                </div>
+
+                <div className="card-foot">
+                  <span className="muted">Secure processing</span>
+                  <label htmlFor="receipt-input" className="link" role="button">
+                    Upload now →
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </>
   );
-  return m ? m[2] : undefined;
 }
+
+// IMPORTANT: Named export only (no default)
