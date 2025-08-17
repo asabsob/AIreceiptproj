@@ -1,8 +1,8 @@
 // Heuristics for extracting an id from arbitrary JSON or headers/text.
 
 export function isValidId(v) {
-  // only letters, numbers, underscore, dash; length 4–64
-  return typeof v === "string" && /^[A-Za-z0-9_-]{4,64}$/.test(v);
+  // allow 1–64 chars, letters/numbers/_/-, and NO dots (prevents 41.46)
+  return typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
 }
 
 export function extractRoomId(responseLike) {
@@ -15,7 +15,7 @@ export function extractRoomId(responseLike) {
       : (responseLike.headers || {});
   const rawText = responseLike.rawText || "";
 
-  // ---- 1) Try common containers in order (NO nullish/|| mixing) ----
+  // 1) Try common containers in order (no ?? with ||)
   const roots = [
     data,
     data?.data,
@@ -30,15 +30,15 @@ export function extractRoomId(responseLike) {
     if (isValidId(id)) return id;
   }
 
-  // ---- 2) Deep search (only accept valid id-like values) ----
+  // 2) Deep search
   const deep = deepFindId(data);
   if (isValidId(deep)) return deep;
 
-  // ---- 3) Location header like /room/abc123 or /session/abc123 ----
+  // 3) Location header like /room/abc or /session/123
   const fromLocation = extractFromUrlish(headers.location || headers.Location);
   if (isValidId(fromLocation)) return fromLocation;
 
-  // ---- 4) Raw text: url-ish or id assignment ----
+  // 4) Raw text
   const fromTextUrl = extractFromUrlish(rawText);
   if (isValidId(fromTextUrl)) return fromTextUrl;
 
@@ -57,10 +57,9 @@ function pickId(o) {
   const candidates = [
     "roomId", "room_id",
     "id", "_id",
-    "sessionId", "session_id",
+    "sessionId", "session_id", "session", // <— added "session"
     "receiptId", "receipt_id",
-    "room",    // sometimes it's just a string id
-    "slug",    // some backends use slugs
+    "room", "slug",
   ];
   for (const k of candidates) {
     const v = o?.[k];
@@ -95,27 +94,28 @@ function deepFindId(o, seen = new Set()) {
 function normalizeId(value, keyHint = "") {
   if (value == null) return undefined;
 
-  // never treat amounts/prices/totals as IDs
+  // never confuse amounts with ids
   if (keyHint && /(total|subtotal|amount|price|tax|grand|balance)/i.test(keyHint)) {
     return undefined;
   }
 
-  // If it’s a string, accept only strict id pattern (no dots/spaces)
   if (typeof value === "string") {
-    // If it’s a URL, extract last segment after /room/ or /session/
+    // reject anything with dots to avoid 41.46
+    if (value.includes(".")) return undefined;
+
+    // allow extracting from url-ish strings
     const fromUrl = extractFromUrlish(value);
     if (fromUrl) return fromUrl;
 
-    if (/^[A-Za-z0-9_-]{4,64}$/.test(value)) return value.trim();
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(value)) return value.trim();
     return undefined;
   }
 
-  // Numbers are ONLY allowed when the key looks like an id key
   if (typeof value === "number") {
-    if ((keyHint && /(^|_)(room|session|receipt)?id$/i.test(keyHint))) {
+    // allow pure numbers ONLY when the key looks like an id or "session"/"room"
+    if (keyHint && /(^|_)(room|session|receipt)?id$/i.test(keyHint) || /^(room|session)$/i.test(keyHint)) {
       const s = String(value);
-      // still reject decimals like 41.46
-      if (/^[0-9]{4,64}$/.test(s)) return s;
+      if (/^[0-9]{1,64}$/.test(s)) return s; // still rejects decimals
     }
     return undefined;
   }
@@ -125,16 +125,16 @@ function normalizeId(value, keyHint = "") {
 
 function extractFromUrlish(s) {
   if (typeof s !== "string") return undefined;
-  // e.g. "/room/abc-123" or ".../session/xyz_456"
-  const m = s.match(/\/(room|session)\/([A-Za-z0-9_-]{4,64})/);
+  // e.g. "/room/abc-123" or ".../session/42"
+  const m = s.match(/\/(room|session)\/([A-Za-z0-9_-]{1,64})/);
   return m ? m[2] : undefined;
 }
 
 function matchIdAssignment(text) {
   if (typeof text !== "string" || !text) return undefined;
-  // e.g. roomId: "abc123", session_id='xyz_456', id=abcd-123
+  // e.g. session: 42, roomId: "abc123", id=xyz_456
   const m = text.match(
-    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{4,64})["']?/
+    /\b(roomId|room_id|sessionId|session_id|session|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{1,64})["']?/
   );
   return m ? m[2] : undefined;
 }
