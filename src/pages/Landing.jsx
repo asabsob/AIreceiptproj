@@ -1,13 +1,13 @@
+
 import React, { useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 export default function Landing() {
   const fileRef = useRef(null);
   const navigate = useNavigate();
 
   const onUploadClick = () => fileRef.current?.click();
-  const onDemoClick = () => navigate("/upload?demo=1");
-
+  
   const onFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -44,10 +44,9 @@ export default function Landing() {
               </p>
 
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                <button className="btn primary" onClick={onUploadClick}>Upload Receipt</button>
-                <button className="btn" onClick={onDemoClick}>Try Demo</button>
-                <Link to="/upload" className="btn" style={{ textDecoration: "none" }}>Open Uploader</Link>
-              </div>
+  <button className="btn primary" onClick={onUploadClick}>Upload Receipt</button>
+  <button className="btn" onClick={onDemoClick}>Use Sample</button>
+</div>
 
               <ul className="muted" style={{ marginTop: 16, paddingLeft: 18 }}>
                 <li>Works with photos or PDFs</li>
