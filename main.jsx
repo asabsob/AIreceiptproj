@@ -1,16 +1,18 @@
 import React from "react";
-import React, { useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+
+import "./index.css";                    // ✅ ensure styles load
+import Landing from "./pages/Landing.jsx"; // ✅ new landing
 import Upload from "./pages/Upload.jsx";
 import Room from "./pages/Room.jsx";
 
-const root = document.getElementById("root");
-createRoot(root).render(
+createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <HashRouter>
       <Routes>
-        <Route path="/" element={<Upload />} />
+        <Route path="/" element={<Landing />} />   {/* default landing */}
+        <Route path="/upload" element={<Upload />} />
         <Route path="/room/:id" element={<Room />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
