@@ -1,3 +1,5 @@
+import React, { useRef } from "react";
+import React, { useRef } from "react";
 export default function Hero({ onUpload, onDemo }) {
   return (
     <section className="hero">

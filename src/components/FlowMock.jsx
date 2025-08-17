@@ -1,3 +1,5 @@
+import React from "react";
+import React, { useRef } from "react";
 export default function FlowMock() {
   const steps = [
     { t: "Upload receipt", d: "Drag & drop a photo or PDF." },
