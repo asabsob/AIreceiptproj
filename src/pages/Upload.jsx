@@ -24,16 +24,24 @@ export default function Upload() {
 
     const id = extractRoomId({ data, headers, rawText });
 
-    if (!isValidId(id)) {
-      alert(
-        "Parsed successfully, but no room id returned. Please check the backend response shape.\n\n" +
-        "Tip: return one of { id | roomId | session | sessionId | receiptId } as a string/number, or set a Location: /session/<id> or /room/<id> header."
-      );
-      return;
-    }
-
-    navigate(`/room/${encodeURIComponent(id)}`);
-  }
-
-  // ...your component’s JSX that calls handleFile(file)
+  if (!isValidId(id)) {
+  alert(
+    "Parsed successfully, but no room id returned. Please check the backend response shape."
+  );
+  return;
 }
+
+// extra safety: make sure this id actually exists server-side
+const base = import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app";
+const check = await fetch(`${base}/session/${encodeURIComponent(id)}`);
+if (!check.ok) {
+  console.warn("ID verification failed:", id, check.status);
+  alert(
+    `Backend returned id "${id}", but GET /session/${id} responded ${check.status}.` +
+    `\nThis likely isn't the session id. Please adjust the backend to return the real session id.`
+  );
+  return;
+}
+
+navigate(`/room/${encodeURIComponent(id)}`);
+
