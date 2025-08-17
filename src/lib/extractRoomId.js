@@ -1,38 +1,127 @@
 // src/lib/extractRoomId.js
-const pick = (o) =>
-  o?.roomId ?? o?.room_id ??
-  o?.id ??
-  o?.sessionId ?? o?.session_id ??
-  o?.receiptId ?? o?.receipt_id;
 
+// Heuristics for extracting an id from arbitrary JSON or headers/text.
 export function extractRoomId(responseLike) {
   if (!responseLike) return undefined;
 
-  // normalize axios/fetch/raw shapes
-  const data = responseLike?.data ?? responseLike;
+  const data = responseLike.data ?? responseLike;
   const headers =
     responseLike?.headers?.get
-      ? Object.fromEntries(responseLike.headers.entries()) // fetch Headers
-      : responseLike?.headers ?? undefined;                // axios headers
+      ? Object.fromEntries(responseLike.headers.entries())
+      : (responseLike.headers || {});
+  const rawText = responseLike.rawText || "";
 
-  // Try common places
-  const fromData =
-    pick(data) ||
-    pick(data?.room) ||
-    pick(data?.data) ||
-    pick(data?.result) ||
-    pick(data?.payload) ||
-    (Array.isArray(data) && pick(data[0])) ||
-    (Array.isArray(data?.rooms) && pick(data.rooms[0]));
+  // 1) Direct keys we expect (in many possible shapes)
+  const direct = pickId(
+    data ??
+      {} ||
+      data?.data ||
+      data?.result ||
+      data?.payload ||
+      data?.room ||
+      (Array.isArray(data) ? data[0] : null)
+  );
+  if (direct) return direct;
 
-  if (fromData) return fromData;
+  // 2) Deep search anywhere in the object
+  const deep = deepFindId(data);
+  if (deep) return deep;
 
-  // Fallback: Location header e.g. /room/abc
-  const loc = headers?.location ?? headers?.Location;
-  if (typeof loc === "string") {
-    const last = loc.split("/").filter(Boolean).pop();
-    if (last) return last;
+  // 3) Look for a Location header like /room/abc123
+  const loc = headers.location || headers.Location;
+  const fromLocation = extractFromUrlish(loc);
+  if (fromLocation) return fromLocation;
+
+  // 4) Try any url-ish strings or simple id assignments in raw text
+  const fromTextUrl = extractFromUrlish(rawText);
+  if (fromTextUrl) return fromTextUrl;
+
+  const fromTextAssign = matchIdAssignment(rawText);
+  if (fromTextAssign) return fromTextAssign;
+
+  return undefined;
+}
+
+// ---- helpers ----
+
+function pickId(o) {
+  if (!o || typeof o !== "object") return undefined;
+  const candidates = [
+    "roomId", "room_id",
+    "id", "_id",
+    "sessionId", "session_id",
+    "receiptId", "receipt_id",
+    "room", // sometimes it's just a string
+    "slug", // some backends use slugs as ids
+  ];
+  for (const k of candidates) {
+    const v = o?.[k];
+    const id = normalizeId(v);
+    if (id) return id;
+  }
+  // nested common containers
+  const nested = o?.room || o?.data || o?.result || o?.payload;
+  if (nested) return pickId(nested);
+  return undefined;
+}
+
+function deepFindId(o, seen = new Set()) {
+  if (!o || typeof o !== "object" || seen.has(o)) return undefined;
+  seen.add(o);
+
+  // key heuristics
+  for (const [k, v] of Object.entries(o)) {
+    const id = normalizeId(v, k);
+    if (id) return id;
+  }
+  // traverse
+  for (const v of Object.values(o)) {
+    if (typeof v === "object") {
+      const found = deepFindId(v, seen);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function normalizeId(value, keyHint = "") {
+  if (value == null) return undefined;
+
+  // If it’s a string that looks like a URL, try to extract the last segment
+  if (typeof value === "string") {
+    const fromUrl = extractFromUrlish(value);
+    if (fromUrl) return fromUrl;
+
+    // direct id-ish string (letters, numbers, -, _), length >= 4
+    if (/^[A-Za-z0-9_-]{4,}$/.test(value)) return value.trim();
+  }
+
+  // If it’s a number, accept it
+  if (typeof value === "number") return String(value);
+
+  // If the key looks like an id key and the value is primitive-ish
+  if (keyHint && /(^|_)(room)?id$/i.test(keyHint)) {
+    if (typeof value === "string" || typeof value === "number") {
+      return String(value);
+    }
   }
 
   return undefined;
+}
+
+function extractFromUrlish(s) {
+  if (typeof s !== "string") return undefined;
+  // e.g. "/room/abc-123", "https://x/room/xyz", "...room/ID"
+  const m = s.match(/\/room\/([A-Za-z0-9_-]{4,})/);
+  if (m) return m[1];
+  return undefined;
+}
+
+function matchIdAssignment(text) {
+  if (typeof text !== "string" || !text) return undefined;
+  // e.g. roomId: "abc123", room_id='xyz', id=abcd-123
+  const m = text.match(
+    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{4,})["']?/
+  );
+  return m ? m[2] : undefined;
 }
