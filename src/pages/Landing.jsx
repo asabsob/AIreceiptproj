@@ -45,7 +45,6 @@ export default function Landing() {
 
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
   <button className="btn primary" onClick={onUploadClick}>Upload Receipt</button>
-  <button className="btn" onClick={onDemoClick}>Use Sample</button>
 </div>
 
               <ul className="muted" style={{ marginTop: 16, paddingLeft: 18 }}>
