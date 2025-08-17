@@ -1,22 +1,20 @@
-// src/main.jsx
 import React from "react";
-import { createRoot } from "react-dom/client";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import ReactDOM from "react-dom/client";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
-import "./index.css";                     // ✅ now inside src
-import Landing from "./pages/Landing.jsx";
+import "./index.css";
+import { Landing } from "./pages/Landing.jsx"; // <-- named import
 import Upload from "./pages/Upload.jsx";
 import Room from "./pages/Room.jsx";
 
-createRoot(document.getElementById("root")).render(
+const router = createBrowserRouter([
+  { path: "/", element: <Landing /> },
+  { path: "/upload", element: <Upload /> },
+  { path: "/room/:id", element: <Room /> },
+]);
+
+ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/room/:id" element={<Room />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </HashRouter>
+    <RouterProvider router={router} />
   </React.StrictMode>
 );
