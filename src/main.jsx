@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter, Routes, Route, Link } from "react-router-dom";
 import Upload from "./pages/Upload.jsx";
 import Room from "./pages/Room.jsx";
+import Landing from "./pages/Landing.jsx"; // ⬅️ NEW
 
 function Header() {
   const isDev = import.meta.env.DEV;
@@ -25,17 +26,24 @@ function Header() {
   );
 }
 
-function AppRoutes() {
+function Shell({ children }) {
   return (
     <>
       <Header />
-      <div className="container">
-        <Routes>
-          <Route path="/" element={<Upload />} />
-          <Route path="/room/:id" element={<Room />} />
-        </Routes>
-      </div>
+      <div className="container">{children}</div>
     </>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <Shell>
+      <Routes>
+        <Route path="/" element={<Landing />} />      {/* ⬅️ NEW default route */}
+        <Route path="/upload" element={<Upload />} />
+        <Route path="/room/:id" element={<Room />} />
+      </Routes>
+    </Shell>
   );
 }
 
