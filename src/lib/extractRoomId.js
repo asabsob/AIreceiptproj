@@ -1,9 +1,4 @@
-// src/lib/extractRoomId.js
-
-export function isValidId(v) {
-  // allow 1–64 chars, letters/numbers/_/-, no dots (prevents 41.46)
-  return typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
-}
+// Heuristics for extracting an id from arbitrary JSON or headers/text.
 
 export function extractRoomId(responseLike) {
   if (!responseLike) return undefined;
@@ -15,31 +10,28 @@ export function extractRoomId(responseLike) {
       : (responseLike.headers || {});
   const rawText = responseLike.rawText || "";
 
-  // 1) Try common containers (no fall-through with ||)
-  const roots = [
-    data,
-    data?.data,
-    data?.result,
-    data?.payload,
-    data?.room,
-    data?.session,               // added
-    Array.isArray(data) ? data[0] : null,
-  ].filter(Boolean);
+  // 1) Common shapes
+  const direct = pickId(
+    data ??
+      {} ||
+      data?.data ||
+      data?.result ||
+      data?.payload ||
+      data?.room ||
+      (Array.isArray(data) ? data[0] : null)
+  );
+  if (isValidId(direct)) return direct;
 
-  for (const root of roots) {
-    const id = pickId(root);
-    if (isValidId(id)) return id;
-  }
-
-  // 2) Deep search but ONLY on id-like keys or url-ish strings
+  // 2) Deep search anywhere in the object
   const deep = deepFindId(data);
   if (isValidId(deep)) return deep;
 
-  // 3) Location header like /room/abc or /session/42
-  const fromLocation = extractFromUrlish(headers.location || headers.Location);
+  // 3) Location header like /room/abc123 or /session/abc123
+  const loc = headers.location || headers.Location;
+  const fromLocation = extractFromUrlish(loc);
   if (isValidId(fromLocation)) return fromLocation;
 
-  // 4) Raw text scanning
+  // 4) Try url-ish strings or "id = abc123" fragments in raw text
   const fromTextUrl = extractFromUrlish(rawText);
   if (isValidId(fromTextUrl)) return fromTextUrl;
 
@@ -49,16 +41,17 @@ export function extractRoomId(responseLike) {
   return undefined;
 }
 
-// ---- helpers ----
+// ---------------- helpers ----------------
 
 function pickId(o) {
   if (!o || typeof o !== "object") return undefined;
-
   const candidates = [
     "roomId", "room_id",
     "id", "_id",
-    "sessionId", "session_id", "session",
+    "sessionId", "session_id",
+    "session", // some backends use "session"
     "receiptId", "receipt_id",
+    "roomCode", "code", "key",
     "room", "slug",
   ];
   for (const k of candidates) {
@@ -66,34 +59,20 @@ function pickId(o) {
     const id = normalizeId(v, k);
     if (isValidId(id)) return id;
   }
-
-  const nested = o?.room || o?.data || o?.result || o?.payload || o?.session;
+  // nested common containers
+  const nested = o?.room || o?.data || o?.result || o?.payload;
   if (nested) return pickId(nested);
-
   return undefined;
-}
-
-function looksLikeIdKey(k = "") {
-  return (
-    /(^|_)(room|session|receipt)?id$/i.test(k) || /^(room|session|receipt)$/i.test(k)
-  );
 }
 
 function deepFindId(o, seen = new Set()) {
   if (!o || typeof o !== "object" || seen.has(o)) return undefined;
   seen.add(o);
 
-  // Only trust id-like keys or URL-ish strings
   for (const [k, v] of Object.entries(o)) {
-    if (looksLikeIdKey(k)) {
-      const id = normalizeId(v, k);
-      if (isValidId(id)) return id;
-    } else if (typeof v === "string") {
-      const fromUrl = extractFromUrlish(v);
-      if (isValidId(fromUrl)) return fromUrl;
-    }
+    const id = normalizeId(v, k);
+    if (isValidId(id)) return id;
   }
-
   for (const v of Object.values(o)) {
     if (typeof v === "object") {
       const found = deepFindId(v, seen);
@@ -106,26 +85,25 @@ function deepFindId(o, seen = new Set()) {
 function normalizeId(value, keyHint = "") {
   if (value == null) return undefined;
 
-  // never confuse amounts with ids
-  if (keyHint && /(total|subtotal|amount|price|tax|grand|balance)/i.test(keyHint)) {
-    return undefined;
-  }
-
+  // If it’s a string that looks like a URL, pull the trailing segment
   if (typeof value === "string") {
-    if (value.includes(".")) return undefined; // reject decimals like 41.46
     const fromUrl = extractFromUrlish(value);
     if (fromUrl) return fromUrl;
-    if (/^[A-Za-z0-9_-]{1,64}$/.test(value)) return value.trim();
-    return undefined;
+
+    // Otherwise accept id-ish strings only
+    if (isValidId(value)) return value.trim();
   }
 
-  if (typeof value === "number") {
-    // only allow numbers if key is id-like
-    if (looksLikeIdKey(keyHint)) {
-      const s = String(value);
-      if (/^[0-9]{1,64}$/.test(s)) return s;
+  // Numbers are accepted only if key looks like *id and value is an integer
+  if (typeof value === "number" && /(^|_)(room|session|receipt)?id$/i.test(keyHint)) {
+    if (Number.isInteger(value)) {
+      return String(value);
     }
-    return undefined;
+  }
+
+  // If the key *explicitly* looks like an id key, accept primitive string
+  if (keyHint && /(^|_)(room|session|receipt)?id$/i.test(keyHint)) {
+    if (typeof value === "string" && isValidId(value)) return value;
   }
 
   return undefined;
@@ -133,14 +111,31 @@ function normalizeId(value, keyHint = "") {
 
 function extractFromUrlish(s) {
   if (typeof s !== "string") return undefined;
-  const m = s.match(/\/(room|session)\/([A-Za-z0-9_-]{1,64})/);
+  // e.g. "/room/abc-123" or "/session/xyz_789"
+  const m = s.match(/\/(room|session)\/([A-Za-z0-9_-]{4,})/);
   return m ? m[2] : undefined;
 }
 
 function matchIdAssignment(text) {
   if (typeof text !== "string" || !text) return undefined;
+  // e.g. roomId: "abc123", id='xyz_789'
   const m = text.match(
-    /\b(roomId|room_id|sessionId|session_id|session|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{1,64})["']?/
+    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{4,})["']?/,
   );
   return m ? m[2] : undefined;
+}
+
+// Stronger validation to avoid picking prices/names like "TEA" or "41.46"
+export function isValidId(s) {
+  if (typeof s !== "string") return false;
+  const t = s.trim();
+  if (!t) return false;
+
+  // Common id formats
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const hex24 = /^[0-9a-f]{24}$/i;                  // Mongo-like
+  const ulid = /^[0-9A-HJKMNP-TV-Z]{26}$/;          // ULID
+  const simple = /^[A-Za-z0-9_-]{4,64}$/;           // general case (>=4, no dots)
+
+  return uuid.test(t) || hex24.test(t) || ulid.test(t) || simple.test(t);
 }
