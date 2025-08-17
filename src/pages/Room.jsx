@@ -1,3 +1,4 @@
+// src/pages/Room.jsx (top part changes only)
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { io } from "socket.io-client";
@@ -8,14 +9,16 @@ const API_BASE = isDev
   ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
   : (import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app");
 
+const ID_RE = /^[A-Za-z0-9_-]{4,64}$/;
+
 export default function Room() {
   const { id } = useParams();
-  const roomId = id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
+  const roomId = id || "";
 
   const [err, setErr] = useState("");
-  const [data, setData] = useState(null);       // { items, subtotal?, tax?, total? }
-  const [claims, setClaims] = useState([]);     // Array<{ [userId]: number }>
-  const [names, setNames]   = useState({});     // { [userId]: string }
+  const [data, setData] = useState(null);
+  const [claims, setClaims] = useState([]);
+  const [names, setNames] = useState({});
   const [presence, setPresence] = useState(0);
   const [youId, setYouId] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -31,57 +34,26 @@ export default function Room() {
     return n;
   });
 
-  /* ------------------------ helpers (no hooks) ------------------------ */
-  const normClaims = (c) =>
-    Array.isArray(c) ? c.map((row) => (row && typeof row === "object" && !Array.isArray(row) ? row : {})) : [];
-
-  const safeEntries = (row) =>
-    row && typeof row === "object" && !Array.isArray(row) ? Object.entries(row) : [];
-
-  // Treat price as line total; divide by quantity for unit
-  const getUnit = (it) => {
-    const qty = Math.max(0, Number(it?.quantity ?? 1));
-    const line = Number(it?.price ?? 0);
-    return qty > 0 ? line / qty : 0;
-  };
-
-  /* -------------------- initial fetch (static data) ------------------- */
+  // ---- FETCH SESSION (strict) ----
   useEffect(() => {
     if (!roomId) return;
+    if (!ID_RE.test(roomId)) {
+      setErr(`Invalid room id: ${roomId}`);
+      return;
+    }
     setErr("");
-    fetch(`${API_BASE}/session/${roomId}`)
+    fetch(`${API_BASE}/session/${encodeURIComponent(roomId)}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((json) => setData(json.data ?? json))
       .catch((e) => setErr(e.message));
   }, [roomId]);
 
-function Avatar({ name }) {
-  const initials = (name || "?")
-    .split(" ")
-    .map(s => s[0]?.toUpperCase())
-    .slice(0, 2)
-    .join("");
-  // hashed hue for consistent color
-  let hash = 0; for (let i=0; i<(name||"").length; i++) hash = (hash*31 + name.charCodeAt(i))|0;
-  const hue = Math.abs(hash) % 360;
-  const bg = `hsl(${hue} 90% 90%)`;
-  const fg = `hsl(${hue} 70% 30%)`;
-  return (
-    <div style={{
-      width:28, height:28, borderRadius:999, display:"grid", placeItems:"center",
-      fontSize:12, fontWeight:700, background:bg, color:fg, border:"1px solid #e5e7eb"
-    }}>
-      {initials || "?"}
-    </div>
-  );
-}
-
-  /* -------------------------- socket wiring --------------------------- */
+  // ---- SOCKET (unchanged except guard on invalid id) ----
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !ID_RE.test(roomId)) return;
     const s = io(API_BASE, {
       withCredentials: false,
-      transports: ["websocket", "polling"], // ws first, then fallback
+      transports: ["websocket", "polling"],
     });
     socketRef.current = s;
 
@@ -110,6 +82,10 @@ function Avatar({ name }) {
 
     return () => s.disconnect();
   }, [roomId, displayName]);
+
+  // ...the rest of your component stays the same
+}
+
 
   /* ----------------- derive values (hooks ALWAYS run) ----------------- */
   // Make these safe when data is null so hooks run every render
