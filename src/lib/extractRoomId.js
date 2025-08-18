@@ -134,6 +134,67 @@ function matchIdAssignment(text) {
 }
 
 // Re-exported utility used by Upload.jsx
+// Strictly handle 6-hex IDs (matches server newRoomId()).
 export function isValidId(x) {
-  return typeof x === "string" && /^[A-Za-z0-9_-]{3,}$/.test(x);
+  return typeof x === "string" && /^[A-F0-9]{6}$/.test(x);
+}
+
+export function extractRoomId(responseLike) {
+  if (!responseLike) return undefined;
+
+  const data =
+    typeof responseLike === "object" && responseLike !== null
+      ? (responseLike.data ?? responseLike)
+      : responseLike;
+
+  const headers =
+    responseLike?.headers?.get
+      ? Object.fromEntries(responseLike.headers.entries())
+      : (responseLike.headers || {});
+  const rawText = responseLike.rawText || "";
+
+  // Only look at obvious id-bearing spots; do NOT deep-scan random fields
+  const candidates = [
+    data?.id,
+    data?.roomId,
+    data?.data?.id,
+    data?.result?.id,
+    data?.payload?.id,
+  ];
+
+  for (const c of candidates) {
+    const id = normalizeId(c);
+    if (id) return id;
+  }
+
+  // Try Location header like /room/ABC123
+  const loc = headers.location || headers.Location;
+  const fromLoc = matchIdInUrlish(loc);
+  if (fromLoc) return fromLoc;
+
+  // Try raw text id=ABC123 style
+  const fromAssign = matchIdAssignment(rawText);
+  if (fromAssign) return fromAssign;
+
+  return undefined;
+}
+
+function normalizeId(v) {
+  if (typeof v !== "string") return undefined;
+  const m = v.match(/^[A-F0-9]{6}$/i);
+  return m ? m[0].toUpperCase() : undefined;
+}
+
+function matchIdInUrlish(s) {
+  if (typeof s !== "string") return undefined;
+  const m = s.match(/\/room\/([A-F0-9]{6})/i);
+  return m ? m[1].toUpperCase() : undefined;
+}
+
+function matchIdAssignment(text) {
+  if (typeof text !== "string" || !text) return undefined;
+  const m = text.match(
+    /\b(id|roomId|room_id)\b\s*[:=]\s*["']?([A-F0-9]{6})["']?/i
+  );
+  return m ? m[2].toUpperCase() : undefined;
 }
