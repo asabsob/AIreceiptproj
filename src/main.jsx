@@ -5,8 +5,8 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import "./index.css";
 import { Landing } from "./pages/Landing.jsx"; // Landing is a named export
-import Upload from "./pages/Upload.jsx";        // Upload is a default export
-import Room from "./pages/Room.jsx";            // Room is a default export
+import Upload from "./pages/Upload.jsx";       // <-- DEFAULT import (no braces)
+import Room from "./pages/Room.jsx";           // default import
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing /> },
