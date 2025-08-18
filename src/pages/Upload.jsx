@@ -1,80 +1,159 @@
 // src/pages/Upload.jsx
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useCallback, useRef, useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { extractRoomId, isValidId } from "../lib/extractRoomId";
 
-const BASE = import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app";
+const isDev = import.meta.env.DEV;
+const API_BASE = isDev
+  ? (import.meta.env.VITE_BACKEND_URL || "http://localhost:5000")
+  : (import.meta.env.VITE_BACKEND_URL || "https://aireceiptsplit-backend-production.up.railway.app");
 
 export default function Upload() {
   const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
 
-  async function handleFile(file) {
-    setBusy(true);
+  const onChooseFile = () => inputRef.current?.click();
+
+  const handleFile = useCallback(async (file) => {
+    if (!file) return;
+    setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
 
-      // 1) Ask backend to parse AND create a session (new server behavior)
-      const res = await fetch(`${BASE}/parse`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/parse`, {
+        method: "POST",
+        body: form,
+      });
 
+      // Build a response-like object for heuristics
       const headers = Object.fromEntries(res.headers.entries());
       const rawText = await res.clone().text().catch(() => "");
       const data = await res.json().catch(() => ({}));
 
-      console.log("[parse] backend response", { headers, data });
+      // Helpful console logs (mirrors the ones you were seeing)
+      console.log("[parse] backend response");
+      console.log("headers:", headers);
+      console.log("data:", data);
 
-      let id = (data?.id && String(data.id).toUpperCase()) || undefined;
-      if (!isValidId(id)) id = extractRoomId({ data, headers, rawText });
+      // Try to pull an id from parse result
+      const id = extractRoomId({ data, headers, rawText });
 
-      // Fallback (if backend not updated yet): create session manually from items
-      if (!isValidId(id) && data?.items && Array.isArray(data.items)) {
-        const s = await fetch(`${BASE}/session`, {
+      if (isValidId(id)) {
+        navigate(`/room/${encodeURIComponent(id)}`);
+        return;
+      }
+
+      // Fallback: if we got items but no id, create a live session
+      if (data && Array.isArray(data.items)) {
+        const r = await fetch(`${API_BASE}/session`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ data }),
         });
-        const j = await s.json().catch(() => ({}));
-        if (isValidId(j?.id)) id = j.id.toUpperCase();
+        const j = await r.json().catch(() => ({}));
+        if (isValidId(j?.id)) {
+          navigate(`/room/${encodeURIComponent(j.id)}`);
+          return;
+        }
       }
 
-      if (!isValidId(id)) {
-        console.warn("Parse ok but no valid room id:", { headers, data, rawText, id });
-        alert(
-          "Parsed successfully, but no valid room id returned.\n" +
-          "Please ensure the backend /parse returns { id } or Location: /room/<ID>."
-        );
-        return;
-      }
-
-      navigate(`/room/${id}`);
-    } catch (e) {
-      console.error(e);
-      alert(`Upload failed: ${e.message}
-      
-Tips:
-• Ensure CORS is enabled on the backend
-• Endpoint should be POST ${BASE}/parse
-• Field name should be "file" (multipart)`);
+      console.warn("Parse succeeded but no valid room id in response:", {
+        data,
+        headers,
+        rawText,
+        id,
+      });
+      alert(
+        "Parsed successfully, but no valid room id returned.\n" +
+        "Ensure the backend returns { id: \"ABC123\" } or sets a Location: /room/ABC123 header.\n" +
+        "If you can't change /parse, it should at least return { items: [...] } so we can create a session."
+      );
+    } catch (err) {
+      console.error(err);
+      alert(
+        `Upload failed: ${err?.message || err}\n\nTips:\n` +
+        `• Ensure CORS is enabled on the backend\n` +
+        `• Endpoint should be POST ${API_BASE}/parse\n` +
+        `• Field name should be "file" (fallback tries "image")`
+      );
     } finally {
-      setBusy(false);
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
     }
-  }
+  }, [navigate]);
+
+  const onInputChange = (e) => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) handleFile(f);
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   return (
-    <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h2>Upload a receipt</h2>
-      <input
-        type="file"
-        accept="image/*"
-        disabled={busy}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
-          e.target.value = "";
+    <div style={{ padding: 16, fontFamily: "system-ui, sans-serif", maxWidth: 700, margin: "0 auto" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Upload a receipt</h2>
+        <Link to="/" style={{ fontSize: 14 }}>← Back</Link>
+      </header>
+
+      <p style={{ color: "#555", marginTop: 0 }}>
+        Drop an image of the receipt, or choose a file. We’ll parse it and start a live room you can share.
+      </p>
+
+      <div
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        style={{
+          border: "2px dashed #ddd",
+          borderRadius: 12,
+          padding: 28,
+          textAlign: "center",
+          background: "#fafafa",
         }}
-      />
-      {busy && <div style={{ marginTop: 8 }}>Parsing…</div>}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: "none" }}
+          onChange={onInputChange}
+        />
+        <div style={{ marginBottom: 12, fontSize: 14, color: "#666" }}>
+          Drag & drop your receipt image here
+        </div>
+        <button
+          onClick={onChooseFile}
+          disabled={uploading}
+          style={{
+            padding: "10px 14px",
+            border: "1px solid #ddd",
+            borderRadius: 8,
+            cursor: uploading ? "not-allowed" : "pointer",
+            background: uploading ? "#eee" : "#111",
+            color: uploading ? "#999" : "#fff",
+            fontWeight: 600,
+          }}
+        >
+          {uploading ? "Uploading…" : "Choose a file"}
+        </button>
+      </div>
+
+      <div style={{ marginTop: 14, fontSize: 12, color: "#777" }}>
+        Backend: <code>{API_BASE}</code>
+      </div>
     </div>
   );
 }
