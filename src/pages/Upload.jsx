@@ -17,29 +17,40 @@ export default function Upload() {
     setBusy(true);
     try {
       const form = new FormData();
-      form.append("file", file); // field MUST be "file"
+      form.append("file", file); // field name must be "file"
 
-      // 1) Try backend "create-on-parse" first (if your server supports it)
-      const res = await fetch(`${API_BASE}/parse?create=1`, {
-        method: "POST",
-        body: form,
-      });
+      // ---- 1) Try parse?create=1 (if backend supports returning an id) ----
+      const res = await fetch(`${API_BASE}/parse?create=1`, { method: "POST", body: form });
 
+      // capture everything for debugging
+      const status = res.status;
+      const ok = res.ok;
       const headers = Object.fromEntries(res.headers.entries());
       const rawText = await res.clone().text().catch(() => "");
-      const data = await res.json().catch(() => ({}));
+      let data = {};
+      try { data = await res.json(); } catch { /* not JSON */ }
 
-      console.log("[parse] backend response", { headers, data });
+      // Print the *actual* payload, not just [Object]
+      console.log("[parse] status:", status, "ok:", ok);
+      console.log("[parse] headers:", headers);
+      console.log("[parse] rawText:", rawText.slice(0, 1000)); // first 1k chars
+      console.log("[parse] json:", data);
 
-      // If backend already returned an id (or Location header), use it
+      if (!ok) {
+        const msg = data?.error || data?.message || `HTTP ${status}`;
+        throw new Error(`Parse failed: ${msg}`);
+      }
+
+      // If backend returned an id (or Location header), use it
       const idFromParse = extractRoomId({ data, headers, rawText });
       if (isValidId(idFromParse)) {
         navigate(`/room/${encodeURIComponent(idFromParse)}`);
         return;
       }
 
-      // 2) Fallback: create the session ourselves using the parsed JSON
-      const parsed = data?.data ?? data; // handle {data:{...}} or flat object
+      // ---- 2) Fallback: create a session from the parsed items ----
+      // Accept both {data:{items:[]}} and {items:[]}
+      const parsed = data?.data ?? data;
       if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
         const make = await fetch(`${API_BASE}/session`, {
           method: "POST",
@@ -47,29 +58,43 @@ export default function Upload() {
           body: JSON.stringify({ data: parsed }),
         });
 
-        const madeHeaders = Object.fromEntries(make.headers.entries());
-        const made = await make.json().catch(() => ({}));
-        console.log("[session:create] response", made);
+        const makeStatus = make.status;
+        const makeHeaders = Object.fromEntries(make.headers.entries());
+        const makeRaw = await make.clone().text().catch(() => "");
+        let made = {};
+        try { made = await make.json(); } catch {}
+        console.log("[session:create] status:", makeStatus, "json:", made, "raw:", makeRaw);
 
-        const id = extractRoomId({ data: made, headers: madeHeaders }) || made.id;
+        if (!make.ok) {
+          const m = made?.error || `HTTP ${makeStatus}`;
+          throw new Error(`Session create failed: ${m}`);
+        }
+
+        const id = extractRoomId({ data: made, headers: makeHeaders, rawText: makeRaw }) || made.id;
         if (isValidId(id)) {
           navigate(`/room/${encodeURIComponent(id)}`);
           return;
         }
+
+        throw new Error("Session create returned no valid id.");
       }
 
+      // If we’re here, parse returned no items — nothing to create a session from.
       alert(
-        "Parsed successfully, but no room id returned.\n" +
-          "I also tried creating a session with the parsed data, but no id came back.\n" +
-          "Please ensure the backend returns { id: \"ABC123\" } from /parse?create=1 or from POST /session."
+        "Parse returned no items, so I couldn’t create a session.\n\n" +
+        "Open your browser DevTools → Network → the /parse request and check the Response.\n" +
+        "Common causes:\n" +
+        "• Backend didn’t parse the image (missing OPENAI_API_KEY or model error)\n" +
+        "• Backend returned an error JSON (check the console logs I printed)\n"
       );
     } catch (err) {
       console.error(err);
       alert(
-        `Upload failed: ${err?.message || err}\n\nTips:\n` +
-          `• Ensure CORS is enabled on the backend\n` +
-          `• Endpoint should be POST ${API_BASE}/parse\n` +
-          `• Field name must be "file"`
+        `Upload failed: ${err?.message || err}\n\n` +
+        `Tips:\n` +
+        `• CORS enabled on backend\n` +
+        `• Endpoint: POST ${API_BASE}/parse (field name "file")\n` +
+        `• If /parse doesn’t return an id, the code falls back to POST ${API_BASE}/session`
       );
     } finally {
       setBusy(false);
