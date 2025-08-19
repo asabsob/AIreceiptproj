@@ -1,7 +1,7 @@
 // src/lib/extractRoomId.js
 export function isValidId(v) {
   // backend newRoomId() creates uppercase hex
-  return typeof v === "string" && /^[A-F0-9]{4,10}$/.test(v);
+  return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v); 
 }
 
 export function extractRoomId(responseLike) {
