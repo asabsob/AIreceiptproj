@@ -1,73 +1,74 @@
 // src/lib/extractRoomId.js
 
-// Public: basic shape check (backend creates 6-char hex like B0A414, but allow general ids too)
-export function isValidId(s) {
-   return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v);
+// Accept the IDs your backend generates (e.g. 6 uppercase hex chars like FB5075)
+export function isValidId(v) {
+  return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v);
 }
 
-// ---- helpers ----
-function extractFromUrlish(s) {
-  if (typeof s !== "string") return undefined;
-  // match ".../room/ABC123" or "https://.../room/ABC123"
-  const m = s.match(/\/room\/([A-Za-z0-9_-]{2,})/);
-  return m ? m[1] : undefined;
-}
+// Heuristics for extracting an id from arbitrary JSON/headers/text.
+export function extractRoomId(responseLike) {
+  if (!responseLike) return undefined;
 
-function matchIdAssignment(text) {
-  if (typeof text !== "string" || !text) return undefined;
-  // e.g. roomId: "abc123", room_id='xyz', id=abcd-123
-  const m = text.match(
-    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([A-Za-z0-9_-]{2,})["']?/
-  );
-  return m ? m[2] : undefined;
-}
+  const data = responseLike.data ?? responseLike;
+  const headers = responseLike?.headers?.get
+    ? Object.fromEntries(responseLike.headers.entries())
+    : (responseLike.headers || {});
+  const rawText = responseLike.rawText || "";
 
-function normalizeId(value, keyHint = "") {
-  if (value == null) return undefined;
+  // 1) Try common shapes in order
+  const candidates = [
+    data,
+    data?.data,
+    data?.result,
+    data?.payload,
+    data?.room,
+    Array.isArray(data) ? data[0] : null,
+  ].filter(Boolean);
 
-  if (typeof value === "string") {
-    // Try URLish first
-    const fromUrl = extractFromUrlish(value);
-    if (fromUrl) return fromUrl;
-
-     const trimmed = value.trim();
-
-    // raw id
-    if (/^[A-Z0-9_-]{4,10}$/.test(trimmed)) return trimmed;
+  for (const c of candidates) {
+    const v = pickId(c);
+    if (isValidId(v)) return v;
   }
 
-  if (typeof value === "number") return String(value);
+  // 2) Deep search anywhere in the object
+  const deep = deepFindId(data);
+  if (isValidId(deep)) return deep;
 
-  // If key looks id-like and value is primitive
-  if (keyHint && /(^|_)(room)?id$/i.test(keyHint)) {
-    if (typeof value === "string") return value.trim();
-      }
+  // 3) Look for a Location header like /room/ABC123
+  const locHeader = headers.location || headers.Location;
+  const fromLoc = extractFromUrlish(locHeader);
+  if (isValidId(fromLoc)) return fromLoc;
+
+  // 4) Try any url-ish strings or simple id assignments in raw text
+  const fromTextUrl = extractFromUrlish(rawText);
+  if (isValidId(fromTextUrl)) return fromTextUrl;
+
+  const fromAssign = matchIdAssignment(rawText);
+  if (isValidId(fromAssign)) return fromAssign;
 
   return undefined;
 }
-  
 
+/* ----------------------------- helpers ----------------------------- */
 
 function pickId(o) {
   if (!o || typeof o !== "object") return undefined;
 
-  // direct candidate keys
-  const candidates = [
-    "roomId", "room_id",
+  const keys = [
     "id", "_id",
+    "roomId", "room_id",
     "sessionId", "session_id",
     "receiptId", "receipt_id",
-    "room", // sometimes room itself is an id string
-    "slug",
+    "room", // sometimes it's just a string
+    "slug", // some backends use slugs as ids
   ];
 
-  for (const k of candidates) {
-    const v = o?.[k];
-    const id = normalizeId(v, k);
+  for (const k of keys) {
+    const id = normalizeId(o?.[k]);
     if (id) return id;
   }
 
-  // nested common containers
+  // fall through nested common containers
   const nested = o?.room || o?.data || o?.result || o?.payload;
   if (nested) return pickId(nested);
 
@@ -78,13 +79,10 @@ function deepFindId(o, seen = new Set()) {
   if (!o || typeof o !== "object" || seen.has(o)) return undefined;
   seen.add(o);
 
-  // key/value heuristics
   for (const [k, v] of Object.entries(o)) {
     const id = normalizeId(v, k);
     if (id) return id;
   }
-
-  // traverse deeper
   for (const v of Object.values(o)) {
     if (typeof v === "object") {
       const found = deepFindId(v, seen);
@@ -93,42 +91,43 @@ function deepFindId(o, seen = new Set()) {
   }
   return undefined;
 }
-export function isValidId(v) {
-  return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v); // 4–10 uppercase hex/underscore/dash; tweak if needed
-}
-// -------------------- main API --------------------
-export function extractRoomId(responseLike) {
-  if (!responseLike) return undefined;
 
-  const data = responseLike.data ?? responseLike;
-  const headers = responseLike?.headers || {};
-  const rawText = responseLike.rawText || "";
+function normalizeId(value, keyHint = "") {
+  if (value == null) return undefined;
 
-  // 1) Common shapes (evaluate each separately; no mixing ?? with ||)
-  const direct =
-    pickId(data) ??
-    pickId(data?.data) ??
-    pickId(data?.result) ??
-    pickId(data?.payload) ??
-    pickId(data?.room) ??
-    (Array.isArray(data) ? pickId(data[0]) : undefined);
-  if (direct) return direct;
+  if (typeof value === "string") {
+    const fromUrl = extractFromUrlish(value);
+    if (fromUrl) return fromUrl;
 
-  // 2) Deep search anywhere in the object
-  const deep = deepFindId(data);
-  if (deep) return deep;
+    const trimmed = value.trim();
+    if (isValidId(trimmed)) return trimmed;
+  }
 
-  // 3) Location header like /room/abc123
-  const loc = headers.location || headers.Location;
-  const fromLocation = extractFromUrlish(loc);
-  if (fromLocation) return fromLocation;
+  if (typeof value === "number") {
+    const s = String(value);
+    if (isValidId(s)) return s;
+  }
 
-  // 4) Raw text hints
-  const fromTextUrl = extractFromUrlish(rawText);
-  if (fromTextUrl) return fromTextUrl;
-
-  const fromTextAssign = matchIdAssignment(rawText);
-  if (fromTextAssign) return fromTextAssign;
+  if (keyHint && /(^|_)(room)?id$/i.test(keyHint)) {
+    const s = String(value);
+    if (isValidId(s)) return s;
+  }
 
   return undefined;
+}
+
+function extractFromUrlish(s) {
+  if (typeof s !== "string") return undefined;
+  // e.g. "/room/ABC123" or "https://x/room/ABC123"
+  const m = s.match(/\/room\/([0-9A-F]{4,10})/i);
+  return m ? m[1].toUpperCase() : undefined;
+}
+
+function matchIdAssignment(text) {
+  if (typeof text !== "string" || !text) return undefined;
+  // e.g. roomId: "ABC123", id=FB5075
+  const m = text.match(
+    /\b(roomId|room_id|sessionId|session_id|receiptId|receipt_id|id)\b\s*[:=]\s*["']?([0-9A-F]{4,10})["']?/i
+  );
+  return m ? m[2].toUpperCase() : undefined;
 }
