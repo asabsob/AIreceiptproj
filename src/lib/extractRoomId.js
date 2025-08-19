@@ -2,7 +2,7 @@
 
 // Public: basic shape check (backend creates 6-char hex like B0A414, but allow general ids too)
 export function isValidId(s) {
-  return typeof s === "string" && /^[A-Za-z0-9_-]{2,}$/.test(s);
+   return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v);
 }
 
 // ---- helpers ----
@@ -30,21 +30,23 @@ function normalizeId(value, keyHint = "") {
     const fromUrl = extractFromUrlish(value);
     if (fromUrl) return fromUrl;
 
+     const trimmed = value.trim();
+
     // raw id
-    if (/^[A-Za-z0-9_-]{2,}$/.test(value)) return value.trim();
+    if (/^[A-Z0-9_-]{4,10}$/.test(trimmed)) return trimmed;
   }
 
   if (typeof value === "number") return String(value);
 
   // If key looks id-like and value is primitive
   if (keyHint && /(^|_)(room)?id$/i.test(keyHint)) {
-    if (typeof value === "string" || typeof value === "number") {
-      return String(value);
-    }
-  }
+    if (typeof value === "string") return value.trim();
+      }
 
   return undefined;
 }
+  
+
 
 function pickId(o) {
   if (!o || typeof o !== "object") return undefined;
@@ -91,7 +93,9 @@ function deepFindId(o, seen = new Set()) {
   }
   return undefined;
 }
-
+export function isValidId(v) {
+  return typeof v === "string" && /^[0-9A-F]{4,10}$/.test(v); // 4–10 uppercase hex/underscore/dash; tweak if needed
+}
 // -------------------- main API --------------------
 export function extractRoomId(responseLike) {
   if (!responseLike) return undefined;
