@@ -58,17 +58,15 @@ export default function Upload() {
           body: JSON.stringify({ data: parsed }),
         });
 
-        const makeStatus = make.status;
-        const makeHeaders = Object.fromEntries(make.headers.entries());
-        const makeRaw = await make.clone().text().catch(() => "");
-        let made = {};
-        try { made = await make.json(); } catch {}
-        console.log("[session:create] status:", makeStatus, "json:", made, "raw:", makeRaw);
+        const made = await make.json().catch(() => ({}));
+  if (!make.ok) throw new Error(made?.error || `HTTP ${make.status}`);
+  const id = made.id;
+  if (!isValidId(id)) throw new Error("Session create returned no valid id");
+  navigate(`/room/${encodeURIComponent(id)}`);
+  return;
+}
 
-        if (!make.ok) {
-          const m = made?.error || `HTTP ${makeStatus}`;
-          throw new Error(`Session create failed: ${m}`);
-        }
+throw new Error("Parse returned no items");
 
         const id = extractRoomId({ data: made, headers: makeHeaders, rawText: makeRaw }) || made.id;
         if (isValidId(id)) {
