@@ -11,81 +11,83 @@ export default function Upload() {
   const [busy, setBusy] = useState(false);
 
   async function handleFile(file) {
-    setBusy(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
+  setBusy(true);
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    // ALSO send a body flag so the backend can see it even if query params are stripped
+    form.append("createSession", "1");
 
-      // Ask backend to PARSE and also CREATE a session if supported
-      const url = `${API_BASE}/parse?create=1`;
-      console.log("[upload] POST", url);
-      const res = await fetch(url, { method: "POST", body: form });
+    // cache-bust to avoid any weird edge caches
+    const url = `${API_BASE}/parse?create=1&_=${Date.now()}`;
+    console.log("[upload] POST", url);
 
-      const headers = Object.fromEntries(res.headers.entries());
-      const rawText = await res.clone().text().catch(() => "");
-      let data = {};
-      try { data = await res.json(); } catch {}
-      console.log("[parse] backend response", { headers, data });
+    const res = await fetch(url, { method: "POST", body: form });
 
-      if (!res.ok) {
+    const headers = Object.fromEntries(res.headers.entries());
+    const rawText = await res.clone().text().catch(() => "");
+    let data = {};
+    try { data = await res.json(); } catch {}
+    console.log("[parse] backend response", { headers, data });
+
+    if (!res.ok) {
+      throw new Error(data?.error || `HTTP ${res.status}. Raw: ${rawText?.slice(0, 400)}`);
+    }
+
+    // Path (1): backend already created a session and returned an id
+    const idFromParse = data?.id || data?.roomId || data?.sessionId || data?.receiptId;
+    if (idFromParse) {
+      console.log("[upload] navigate with id from /parse:", idFromParse);
+      navigate(`/room/${encodeURIComponent(String(idFromParse))}`);
+      return;
+    }
+
+    // Path (2): fallback – create session ourselves
+    if (Array.isArray(data?.items) && data.items.length > 0) {
+      const sUrl = `${API_BASE}/session`;
+      console.log("[upload] POST", sUrl, "with", data.items.length, "items");
+      const sRes = await fetch(sUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data }),
+      });
+      const sText = await sRes.clone().text().catch(() => "");
+      let sJson = {};
+      try { sJson = await sRes.json(); } catch {}
+      console.log("[session] response", sRes.status, sJson || sText);
+
+      if (!sRes.ok) {
         throw new Error(
-          data?.error || `HTTP ${res.status}. Raw: ${rawText?.slice(0, 400)}`
+          sJson?.error || `Could not create session (HTTP ${sRes.status}). Raw: ${sText?.slice(0, 400)}`
         );
       }
 
-      // Path (1): backend created a session and returned an id
-      const idFromParse = data?.id || data?.roomId || data?.sessionId || data?.receiptId;
-      if (idFromParse) {
-        console.log("[upload] navigate with id from /parse:", idFromParse);
-        navigate(`/room/${encodeURIComponent(String(idFromParse))}`);
+      const sid = sJson?.id;
+      if (sid) {
+        console.log("[upload] navigate with id from /session:", sid);
+        navigate(`/room/${encodeURIComponent(String(sid))}`);
         return;
       }
-
-      // Path (2): fallback – create the session ourselves if items exist
-      if (Array.isArray(data?.items) && data.items.length > 0) {
-        const sUrl = `${API_BASE}/session`;
-        console.log("[upload] POST", sUrl, "with", data.items.length, "items");
-        const sRes = await fetch(sUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ data }),
-        });
-        const sText = await sRes.clone().text().catch(() => "");
-        let sJson = {};
-        try { sJson = await sRes.json(); } catch {}
-        console.log("[session] response", sRes.status, sJson || sText);
-
-        if (!sRes.ok) {
-          throw new Error(
-            sJson?.error || `Could not create session (HTTP ${sRes.status}). Raw: ${sText?.slice(0, 400)}`
-          );
-        }
-
-        const sid = sJson?.id;
-        if (sid) {
-          console.log("[upload] navigate with id from /session:", sid);
-          navigate(`/room/${encodeURIComponent(String(sid))}`);
-          return;
-        }
-      }
-
-      alert(
-        "Parsed successfully, but no room id returned.\n\n" +
-        "Either:\n" +
-        "• Update backend to return { id } from POST /parse?create=1, or\n" +
-        "• Ensure frontend’s fallback POST /session succeeds (check Network tab)."
-      );
-    } catch (e) {
-      console.error("[upload] error", e);
-      alert(
-        `Upload failed: ${e.message}\n\n` +
-        `Backend: ${API_BASE}\n` +
-        "Check DevTools → Network for /parse and /session responses."
-      );
-    } finally {
-      setBusy(false);
     }
+
+    alert(
+      "Parsed successfully, but no room id returned.\n\n" +
+      "Either:\n" +
+      "• Update backend to return { id } from POST /parse?create=1, or\n" +
+      "• Ensure frontend’s fallback POST /session succeeds (check Network tab)."
+    );
+  } catch (e) {
+    console.error("[upload] error", e);
+    alert(
+      `Upload failed: ${e.message}\n\n` +
+      `Backend: ${API_BASE}\n` +
+      "Check DevTools → Network for /parse and /session responses."
+    );
+  } finally {
+    setBusy(false);
   }
+}
+
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
