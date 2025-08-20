@@ -6,7 +6,7 @@ const API_BASE =
   import.meta.env.VITE_BACKEND_URL ||
   "https://aireceiptsplit-backend-production.up.railway.app";
 
-function Upload() {
+export default function Upload() {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
 
@@ -16,80 +16,72 @@ function Upload() {
       const form = new FormData();
       form.append("file", file);
 
-      // Ask backend to PARSE and also CREATE a session in one call
-      const res = await fetch(`${API_BASE}/parse?create=1`, {
-        method: "POST",
-        body: form,
-      });
+      // Ask backend to PARSE and also CREATE a session if supported
+      const url = `${API_BASE}/parse?create=1`;
+      console.log("[upload] POST", url);
+      const res = await fetch(url, { method: "POST", body: form });
 
       const headers = Object.fromEntries(res.headers.entries());
-      const text = await res.clone().text().catch(() => "");
+      const rawText = await res.clone().text().catch(() => "");
       let data = {};
-      try {
-        data = await res.json();
-      } catch {
-        // keep data as {}
-      }
-
+      try { data = await res.json(); } catch {}
       console.log("[parse] backend response", { headers, data });
 
       if (!res.ok) {
         throw new Error(
-          data?.error ||
-            `HTTP ${res.status}. Check Network tab for /parse response body.`
+          data?.error || `HTTP ${res.status}. Raw: ${rawText?.slice(0, 400)}`
         );
       }
 
-      // Preferred: backend returns { id, joinUrl?, data? }
-      const idFromParse =
-        data?.id ||
-        data?.roomId ||
-        data?.sessionId ||
-        data?.receiptId ||
-        undefined;
-
+      // Path (1): backend created a session and returned an id
+      const idFromParse = data?.id || data?.roomId || data?.sessionId || data?.receiptId;
       if (idFromParse) {
+        console.log("[upload] navigate with id from /parse:", idFromParse);
         navigate(`/room/${encodeURIComponent(String(idFromParse))}`);
         return;
       }
 
-      // Fallback: if parse returned only items, create a session explicitly.
-      if (Array.isArray(data?.items)) {
-        const sRes = await fetch(`${API_BASE}/session`, {
+      // Path (2): fallback – create the session ourselves if items exist
+      if (Array.isArray(data?.items) && data.items.length > 0) {
+        const sUrl = `${API_BASE}/session`;
+        console.log("[upload] POST", sUrl, "with", data.items.length, "items");
+        const sRes = await fetch(sUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ data }),
         });
-        const sJson = await sRes.json().catch(() => ({}));
+        const sText = await sRes.clone().text().catch(() => "");
+        let sJson = {};
+        try { sJson = await sRes.json(); } catch {}
+        console.log("[session] response", sRes.status, sJson || sText);
+
         if (!sRes.ok) {
           throw new Error(
-            sJson?.error ||
-              `Could not create session (HTTP ${sRes.status}).`
+            sJson?.error || `Could not create session (HTTP ${sRes.status}). Raw: ${sText?.slice(0, 400)}`
           );
         }
+
         const sid = sJson?.id;
         if (sid) {
+          console.log("[upload] navigate with id from /session:", sid);
           navigate(`/room/${encodeURIComponent(String(sid))}`);
           return;
         }
       }
 
-      // If we got here, we couldn't get an id
       alert(
         "Parsed successfully, but no room id returned.\n\n" +
-          "Ensure the backend either:\n" +
-          "• returns { id: \"ABC123\" } when calling POST /parse?create=1, or\n" +
-          "• returns { items:[...] } so the frontend can POST /session."
+        "Either:\n" +
+        "• Update backend to return { id } from POST /parse?create=1, or\n" +
+        "• Ensure frontend’s fallback POST /session succeeds (check Network tab)."
       );
     } catch (e) {
+      console.error("[upload] error", e);
       alert(
-        `Upload failed: ${e.message}\n\nTips:\n` +
-          "• Ensure CORS is enabled on the backend\n" +
-          `• Endpoint: POST ${API_BASE}/parse (we call with ?create=1)\n` +
-          "• Field name must be \"file\" (FormData)\n" +
-          "• Check your browser DevTools → Network for the /parse response body"
+        `Upload failed: ${e.message}\n\n` +
+        `Backend: ${API_BASE}\n` +
+        "Check DevTools → Network for /parse and /session responses."
       );
-      console.error(e);
     } finally {
       setBusy(false);
     }
@@ -99,8 +91,7 @@ function Upload() {
     <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
       <h2>Upload a receipt</h2>
       <p style={{ color: "#555" }}>
-        Choose an image; we’ll parse it and create a live room to split the
-        bill.
+        Choose an image; we’ll parse it and create a live room to split the bill.
       </p>
 
       <input
@@ -122,5 +113,3 @@ function Upload() {
     </div>
   );
 }
-
-export default Upload; // <-- DEFAULT EXPORT
