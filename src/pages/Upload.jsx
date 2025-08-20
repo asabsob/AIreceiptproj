@@ -11,46 +11,42 @@ export default function Upload() {
   const [busy, setBusy] = useState(false);
 
   async function handleFile(file) {
-  setBusy(true);
-  try {
-    const form = new FormData();
-    form.append("file", file);
-    // ALSO send a body flag so the backend can see it even if query params are stripped
-    form.append("createSession", "1");
+    setBusy(true);
+    try {
+      // 1) Parse image -> get items
+      const form = new FormData();
+      form.append("file", file);
 
-    // cache-bust to avoid any weird edge caches
-    const url = `${API_BASE}/parse?create=1&_=${Date.now()}`;
-    console.log("[upload] POST", url);
+      const parseUrl = `${API_BASE}/parse`; // <-- no flags, just parse
+      console.log("[upload] POST", parseUrl);
+      const parseRes = await fetch(parseUrl, { method: "POST", body: form });
 
-    const res = await fetch(url, { method: "POST", body: form });
+      const headers = Object.fromEntries(parseRes.headers.entries());
+      const rawText = await parseRes.clone().text().catch(() => "");
+      let parsed = {};
+      try { parsed = await parseRes.json(); } catch {}
+      console.log("[parse] backend response", { headers, data: parsed });
 
-    const headers = Object.fromEntries(res.headers.entries());
-    const rawText = await res.clone().text().catch(() => "");
-    let data = {};
-    try { data = await res.json(); } catch {}
-    console.log("[parse] backend response", { headers, data });
+      if (!parseRes.ok) {
+        throw new Error(
+          parsed?.error || `HTTP ${parseRes.status}. Raw: ${rawText?.slice(0, 400)}`
+        );
+      }
 
-    if (!res.ok) {
-      throw new Error(data?.error || `HTTP ${res.status}. Raw: ${rawText?.slice(0, 400)}`);
-    }
+      // 2) Validate items
+      if (!Array.isArray(parsed?.items) || parsed.items.length === 0) {
+        throw new Error("Parse returned no items.");
+      }
 
-    // Path (1): backend already created a session and returned an id
-    const idFromParse = data?.id || data?.roomId || data?.sessionId || data?.receiptId;
-    if (idFromParse) {
-      console.log("[upload] navigate with id from /parse:", idFromParse);
-      navigate(`/room/${encodeURIComponent(String(idFromParse))}`);
-      return;
-    }
-
-    // Path (2): fallback – create session ourselves
-    if (Array.isArray(data?.items) && data.items.length > 0) {
-      const sUrl = `${API_BASE}/session`;
-      console.log("[upload] POST", sUrl, "with", data.items.length, "items");
-      const sRes = await fetch(sUrl, {
+      // 3) Always create a session on the backend from parsed data
+      const sessionUrl = `${API_BASE}/session`;
+      console.log("[session] POST", sessionUrl, "items:", parsed.items.length);
+      const sRes = await fetch(sessionUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ data: parsed }),
       });
+
       const sText = await sRes.clone().text().catch(() => "");
       let sJson = {};
       try { sJson = await sRes.json(); } catch {}
@@ -62,32 +58,24 @@ export default function Upload() {
         );
       }
 
-      const sid = sJson?.id;
-      if (sid) {
-        console.log("[upload] navigate with id from /session:", sid);
-        navigate(`/room/${encodeURIComponent(String(sid))}`);
-        return;
+      const id = sJson?.id;
+      if (!id) {
+        throw new Error("Session created but no id returned.");
       }
+
+      console.log("[upload] navigate -> /room/", id);
+      navigate(`/room/${encodeURIComponent(String(id))}`);
+    } catch (e) {
+      console.error("[upload] error", e);
+      alert(
+        `Upload failed: ${e.message}\n\n` +
+        `Backend: ${API_BASE}\n` +
+        "Open DevTools → Network and check the /parse then /session requests."
+      );
+    } finally {
+      setBusy(false);
     }
-
-    alert(
-      "Parsed successfully, but no room id returned.\n\n" +
-      "Either:\n" +
-      "• Update backend to return { id } from POST /parse?create=1, or\n" +
-      "• Ensure frontend’s fallback POST /session succeeds (check Network tab)."
-    );
-  } catch (e) {
-    console.error("[upload] error", e);
-    alert(
-      `Upload failed: ${e.message}\n\n` +
-      `Backend: ${API_BASE}\n` +
-      "Check DevTools → Network for /parse and /session responses."
-    );
-  } finally {
-    setBusy(false);
   }
-}
-
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
