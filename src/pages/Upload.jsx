@@ -13,64 +13,73 @@ export default function Upload() {
   async function handleFile(file) {
     setBusy(true);
     try {
-      // 1) Parse image -> get items
+      // ---- 1) PARSE (no heuristics, no id guessing) ----
       const form = new FormData();
       form.append("file", file);
 
-      const parseUrl = `${API_BASE}/parse`; // <-- no flags, just parse
-      console.log("[upload] POST", parseUrl);
+      const parseUrl = `${API_BASE}/parse?create=1&cb=${Date.now()}`;
       const parseRes = await fetch(parseUrl, { method: "POST", body: form });
 
-      const headers = Object.fromEntries(parseRes.headers.entries());
-      const rawText = await parseRes.clone().text().catch(() => "");
-      let parsed = {};
-      try { parsed = await parseRes.json(); } catch {}
-      console.log("[parse] backend response", { headers, data: parsed });
+      const parseText = await parseRes.clone().text().catch(() => "");
+      let parseJson = {};
+      try { parseJson = await parseRes.json(); } catch {}
+
+      console.log("[/parse] status:", parseRes.status, parseJson || parseText);
 
       if (!parseRes.ok) {
         throw new Error(
-          parsed?.error || `HTTP ${parseRes.status}. Raw: ${rawText?.slice(0, 400)}`
+          parseJson?.error || `Parse failed (HTTP ${parseRes.status})`
         );
       }
 
-      // 2) Validate items
-      if (!Array.isArray(parsed?.items) || parsed.items.length === 0) {
-        throw new Error("Parse returned no items.");
+      // If backend already created a session, use it.
+      if (parseJson?.id) {
+        navigate(`/room/${encodeURIComponent(String(parseJson.id))}`);
+        return;
       }
 
-      // 3) Always create a session on the backend from parsed data
-      const sessionUrl = `${API_BASE}/session`;
-      console.log("[session] POST", sessionUrl, "items:", parsed.items.length);
-      const sRes = await fetch(sessionUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: parsed }),
+      // ---- 2) FALLBACK: CREATE SESSION from parsed items ----
+      const items = parseJson?.items;
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error("Parser returned no items to create a session.");
+      }
+
+      const body = JSON.stringify({
+        data: {
+          items,
+          subtotal: parseJson?.subtotal ?? null,
+          tax: parseJson?.tax ?? null,
+          total: parseJson?.total ?? null,
+        },
       });
 
-      const sText = await sRes.clone().text().catch(() => "");
-      let sJson = {};
-      try { sJson = await sRes.json(); } catch {}
-      console.log("[session] response", sRes.status, sJson || sText);
+      const sessUrl = `${API_BASE}/session?cb=${Date.now()}`;
+      const sessRes = await fetch(sessUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
 
-      if (!sRes.ok) {
+      const sessText = await sessRes.clone().text().catch(() => "");
+      let sessJson = {};
+      try { sessJson = await sessRes.json(); } catch {}
+
+      console.log("[/session] status:", sessRes.status, sessJson || sessText);
+
+      if (!sessRes.ok || !sessJson?.id) {
         throw new Error(
-          sJson?.error || `Could not create session (HTTP ${sRes.status}). Raw: ${sText?.slice(0, 400)}`
+          sessJson?.error ||
+          `Could not create session (HTTP ${sessRes.status})`
         );
       }
 
-      const id = sJson?.id;
-      if (!id) {
-        throw new Error("Session created but no id returned.");
-      }
-
-      console.log("[upload] navigate -> /room/", id);
-      navigate(`/room/${encodeURIComponent(String(id))}`);
+      navigate(`/room/${encodeURIComponent(String(sessJson.id))}`);
     } catch (e) {
-      console.error("[upload] error", e);
+      console.error("[upload] error:", e);
       alert(
         `Upload failed: ${e.message}\n\n` +
         `Backend: ${API_BASE}\n` +
-        "Open DevTools → Network and check the /parse then /session requests."
+        `Check DevTools → Network for /parse and /session responses.`
       );
     } finally {
       setBusy(false);
@@ -80,9 +89,7 @@ export default function Upload() {
   return (
     <div style={{ padding: 16, fontFamily: "system-ui, sans-serif" }}>
       <h2>Upload a receipt</h2>
-      <p style={{ color: "#555" }}>
-        Choose an image; we’ll parse it and create a live room to split the bill.
-      </p>
+      <p>We’ll parse it and open a live room automatically.</p>
 
       <input
         type="file"
