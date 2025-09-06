@@ -44,13 +44,12 @@ function Avatar({ name }) {
 
 export default function Room() {
   const { id } = useParams();
-  const roomId =
-    id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
+  const roomId = id || (window.location.hash.match(/\/live\/([^/?#]+)/)?.[1] ?? "");
 
   const [err, setErr] = useState("");
-  const [data, setData] = useState(null); // { items, subtotal?, tax?, total? }
+  const [data, setData] = useState(null);   // { items, subtotal?, tax?, total? }
   const [claims, setClaims] = useState([]); // Array<{ [userId]: number }>
-  const [names, setNames] = useState({}); // { [userId]: string }
+  const [names, setNames] = useState({});   // { [userId]: string }
   const [presence, setPresence] = useState(0);
   const [youId, setYouId] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -77,12 +76,14 @@ export default function Room() {
   const safeEntries = (row) =>
     row && typeof row === "object" && !Array.isArray(row) ? Object.entries(row) : [];
 
-  // Treat price as line total; divide by quantity for unit
-  const getUnit = (it) => {
-    const qty = Math.max(0, Number(it?.quantity ?? 1));
-    const line = Number(it?.price ?? 0);
-    return qty > 0 ? line / qty : 0;
+  // ✅ price from parser is a UNIT price; line = unit * quantity
+  const unitOf = (it) => Number(it?.price || 0);
+  const qtyOf  = (it) => {
+    const q = Number(it?.quantity ?? 1);
+    return Number.isFinite(q) && q > 0 ? q : 1;
   };
+  const lineOf = (it) => unitOf(it) * qtyOf(it);
+  const money3 = (n) => (+(Number(n) || 0)).toFixed(3);
 
   /* -------------------- initial fetch (static data) ------------------- */
   useEffect(() => {
@@ -112,9 +113,7 @@ export default function Room() {
       s.emit("join", { roomId, name: displayName });
     });
     s.on("disconnect", () => setConnected(false));
-    s.on("connect_error", (e) =>
-      console.warn("socket connect_error:", e?.message || e)
-    );
+    s.on("connect_error", (e) => console.warn("socket connect_error:", e?.message || e));
 
     s.on("room:error", ({ code }) => setErr(code || "room-error"));
     s.on("room:state", (payload) => {
@@ -136,23 +135,26 @@ export default function Room() {
 
   /* ----------------- derive values (hooks ALWAYS run) ----------------- */
   const items = Array.isArray(data?.items) ? data.items : [];
-  const subtotalPrinted = Number.isFinite(+data?.subtotal)
-    ? Number(data.subtotal)
-    : null;
-  const totalPrinted = Number.isFinite(+data?.total) ? Number(data.total) : null;
+  const subtotalPrinted = Number.isFinite(+data?.subtotal) ? +data.subtotal : null;
+  const totalPrinted    = Number.isFinite(+data?.total)    ? +data.total    : null;
+
+  // Bill summary (falls back to computed if not printed)
+  const subtotalAuto = useMemo(
+    () => items.reduce((a, it) => a + lineOf(it), 0),
+    [items]
+  );
+  const subtotal = subtotalPrinted != null ? subtotalPrinted : subtotalAuto;
+  const total    = totalPrinted    != null ? totalPrinted    : subtotal;
+  const fees     = Math.max(0, +(total - subtotal).toFixed(3));
 
   const sumClaims = (idx) =>
-    safeEntries(claims[idx] || {}).reduce(
-      (a, [, q]) => a + (Number(q) || 0),
-      0
-    );
-  const remaining = (idx) =>
-    Math.max(0, Number(items[idx]?.quantity ?? 1) - sumClaims(idx));
-  const mineQty = (idx) =>
-    youId ? Number((claims[idx] || {})[youId] || 0) : 0;
+    safeEntries(claims[idx] || {}).reduce((a, [, q]) => a + (Number(q) || 0), 0);
+
+  const remaining = (idx) => Math.max(0, qtyOf(items[idx]) - sumClaims(idx));
+  const mineQty = (idx) => (youId ? Number((claims[idx] || {})[youId] || 0) : 0);
 
   const takenByOtherSingle = (idx) => {
-    const qty = Number(items[idx]?.quantity ?? 1);
+    const qty = qtyOf(items[idx]);
     if (qty > 1) return false;
     const ent = safeEntries(claims[idx] || {});
     if (ent.length === 0) return false;
@@ -170,35 +172,20 @@ export default function Room() {
       let baseSum = 0;
 
       items.forEach((it, idx) => {
-        const unit = getUnit(it);
+        const u = unitOf(it);
         safeEntries(claims[idx] || {}).forEach(([uid, q]) => {
           const qty = Number(q) || 0;
-          userBase[uid] = (userBase[uid] || 0) + unit * qty;
-          baseSum += unit * qty;
+          const share = u * qty;    // unit * claimed qty
+          userBase[uid] = (userBase[uid] || 0) + share;
+          baseSum += share;
         });
       });
-
-      const subtotal =
-        subtotalPrinted != null
-          ? subtotalPrinted
-          : items.reduce(
-              (a, it) => a + getUnit(it) * (Number(it.quantity ?? 1)),
-              0
-            );
-
-      const total = totalPrinted != null ? totalPrinted : subtotal;
-      const fees = Math.max(0, +(total - subtotal).toFixed(3));
 
       const out = {};
       const uids = Object.keys(userBase);
       for (const uid of uids) {
         const base = userBase[uid];
-        const feeShare =
-          baseSum > 0
-            ? fees * (base / baseSum)
-            : uids.length
-            ? fees / uids.length
-            : 0;
+        const feeShare = baseSum > 0 ? fees * (base / baseSum) : (uids.length ? fees / uids.length : 0);
         out[uid] = +(base + feeShare).toFixed(3);
       }
       return out;
@@ -206,12 +193,10 @@ export default function Room() {
       console.error("perUserTotals failed:", e);
       return {};
     }
-  }, [claims, items, subtotalPrinted, totalPrinted]);
+  }, [claims, items, fees]);
 
   const yourTotal =
-    youId && Number.isFinite(+perUserTotals[youId])
-      ? perUserTotals[youId]
-      : 0;
+    youId && Number.isFinite(+perUserTotals[youId]) ? perUserTotals[youId] : 0;
 
   /* --------------------------- early UI returns ------------------------ */
   if (!roomId) {
@@ -227,13 +212,7 @@ export default function Room() {
   }
   if (err) {
     return (
-      <div
-        style={{
-          padding: 16,
-          fontFamily: "system-ui,sans-serif",
-          color: "#b00020",
-        }}
-      >
+      <div style={{ padding: 16, fontFamily: "system-ui,sans-serif", color: "#b00020" }}>
         <h2>Couldn’t load room {roomId}</h2>
         <p>Error: {err}</p>
         <Link to="/">← Back</Link>
@@ -334,6 +313,26 @@ export default function Room() {
         </div>
       </div>
 
+      {/* bill summary */}
+      <div
+        style={{
+          marginTop: 12,
+          display: "flex",
+          gap: 16,
+          flexWrap: "wrap",
+          alignItems: "stretch",
+        }}
+      >
+        <div style={{ padding: 12, border: "1px solid #eee", borderRadius: 12, minWidth: 240 }}>
+          <h3 style={{ margin: "4px 0 8px" }}>Bill summary</h3>
+          <div style={{ display: "grid", rowGap: 6 }}>
+            <div>Subtotal: <b>{money3(subtotal)}</b></div>
+            <div>Tax/Fees: <b>{money3(fees)}</b></div>
+            <div>Total due: <b>{money3(total)}</b></div>
+          </div>
+        </div>
+      </div>
+
       {/* items */}
       <table
         style={{
@@ -366,8 +365,8 @@ export default function Room() {
         </thead>
         <tbody>
           {items.map((it, idx) => {
-            const unit = getUnit(it);
-            const qty = Number(it.quantity ?? 1);
+            const unit = unitOf(it);
+            const qty = qtyOf(it);
             const row = claims[idx] || {};
             const left = remaining(idx);
             const my = mineQty(idx);
@@ -392,9 +391,7 @@ export default function Room() {
                 </td>
                 <td style={{ padding: 8, borderBottom: "1px solid #f1f1f1" }}>
                   <div style={{ fontSize: 13, display: "grid", gap: 6 }}>
-                    {safeEntries(row).length === 0 && (
-                      <span style={{ color: "#777" }}>—</span>
-                    )}
+                    {safeEntries(row).length === 0 && <span style={{ color: "#777" }}>—</span>}
                     {safeEntries(row).map(([uid, q]) => (
                       <div key={uid} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <Avatar name={names[uid] || uid} />
@@ -424,13 +421,7 @@ export default function Room() {
                     <button
                       onClick={() => claimOne(idx)}
                       disabled={!canTake}
-                      title={
-                        connected
-                          ? single
-                            ? "Claim this item"
-                            : "Claim 1 unit"
-                          : "Connecting…"
-                      }
+                      title={connected ? (single ? "Claim this item" : "Claim 1 unit") : "Connecting…"}
                       style={{
                         padding: "6px 10px",
                         border: "1px solid #ddd",
@@ -445,9 +436,7 @@ export default function Room() {
                     <button
                       onClick={() => unclaimOne(idx)}
                       disabled={!canDrop}
-                      title={
-                        connected ? (single ? "Release" : "Return 1 unit") : "Connecting…"
-                      }
+                      title={connected ? (single ? "Release" : "Return 1 unit") : "Connecting…"}
                       style={{
                         padding: "6px 10px",
                         border: "1px solid #ddd",
@@ -456,7 +445,7 @@ export default function Room() {
                         background: "white",
                       }}
                     >
-                      {single ? "Release" : "−1"}
+                      {single ? "−1" : "−1"}
                     </button>
                   </div>
                 </td>
@@ -466,7 +455,7 @@ export default function Room() {
         </tbody>
       </table>
 
-      {/* totals */}
+      {/* per-user totals */}
       <div
         style={{
           marginTop: 16,
@@ -487,13 +476,13 @@ export default function Room() {
                 {names[uid] || uid}
                 {uid === youId ? " (you)" : ""}
               </span>
-              <b>{(Number(amt) || 0).toFixed(3)}</b>
+              <b>{money3(amt)}</b>
             </div>
           ))}
         </div>
         {youId && (
           <div style={{ marginTop: 8, fontSize: 13, color: "#333" }}>
-            Your current total: <b>{(Number(yourTotal) || 0).toFixed(3)}</b>
+            Your current total: <b>{money3(yourTotal)}</b>
           </div>
         )}
       </div>
